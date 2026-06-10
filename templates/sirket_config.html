@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+{% block title %}Şirket Yapılandırması | NakitAkım WebAdmin{% endblock %}
+{% block page_title %}🔌 Şirket webadmin Yapılandırması{% endblock %}
+
+{% block content %}
+<style>
+.config-card {
+  background: #fff;
+  border: 1.5px solid #e0e7ff;
+  border-radius: 16px;
+  padding: 28px 32px;
+  margin-bottom: 24px;
+}
+.config-card h2 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0 0 18px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.form-group { display: flex; flex-direction: column; gap: 4px; }
+.form-group label { font-size: 12px; font-weight: 600; color: #374151; }
+.form-group input, .form-group select {
+  height: 36px; padding: 0 10px;
+  border: 1.5px solid #e2e8f0; border-radius: 8px;
+  font-size: 13px; color: #1f2937;
+  background: #f8fafc;
+  outline: none;
+}
+.form-group input:focus, .form-group select:focus { border-color: #6366f1; background: #fff; }
+.form-group.full { grid-column: 1/-1; }
+.toggle-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 6px;
+}
+.toggle-row label { font-size: 13px; color: #374151; font-weight: 500; }
+input[type="checkbox"] { width: 16px; height: 16px; accent-color: #6366f1; }
+.btn { display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 18px; height: 38px; border: none; border-radius: 9px;
+  font-size: 13px; font-weight: 700; cursor: pointer; text-decoration: none; }
+.btn-primary { background: #6366f1; color: white; }
+.btn-primary:hover { background: #4f46e5; }
+.btn-danger { background: #ef4444; color: white; }
+.btn-danger:hover { background: #dc2626; }
+.btn-ghost { background: #f1f5f9; color: #475569; border: 1.5px solid #e2e8f0; }
+.btn-ghost:hover { background: #e2e8f0; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { background: #f8fafc; font-weight: 600; color: #374151;
+  padding: 10px 14px; text-align: left; border-bottom: 1.5px solid #e2e8f0; }
+td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; color: #1f2937; }
+tr:hover td { background: #fafafe; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 600; }
+.badge-aktif { background: #d1fae5; color: #065f46; }
+.badge-pasif { background: #fee2e2; color: #991b1b; }
+.url-cell { font-family: monospace; font-size: 12px; color: #6366f1; }
+.info-box {
+  background: #eff6ff; border: 1px solid #bfdbfe;
+  border-radius: 10px; padding: 14px 18px; margin-bottom: 20px;
+  font-size: 12px; color: #1d4ed8; line-height: 1.6;
+}
+</style>
+
+<div class="info-box">
+  <strong>🔌 Şirket Bazlı webadmin Yapılandırması</strong><br>
+  Her şirkete (kullanıcıya) hangi webadmin sunucusunun URL'inin atanacağını buradan ayarlayın.<br>
+  nakitAkim uygulaması veri çekerken bu tablodaki <code>webadmin_url</code> adresini kullanır.
+  Müşteriye nakitAkim uygulamasını verirseniz, onların <code>userid</code>'sine karşılık gelen URL'i burada tanımlayın.
+</div>
+
+<!-- ── Yeni Ekle Formu ── -->
+<div class="config-card">
+  <h2>➕ Yeni Şirket Ekle / Güncelle</h2>
+  <form method="POST" action="{{ url_for('sirket_config.sirket_config_save') }}">
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Kullanıcı (userid)</label>
+        <select name="userid" required>
+          <option value="">— Seçin —</option>
+          {% for u in users %}
+          <option value="{{ u.id }}">{{ u.id }} — {{ u.kullanici_adi }} ({{ u.eposta }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Firma Adı (etiket)</label>
+        <input type="text" name="firmaadi" placeholder="fppro, acmecorp, ...">
+      </div>
+      <div class="form-group">
+        <label>webadmin URL</label>
+        <input type="text" name="webadmin_url"
+               placeholder="http://212.x.x.x:5050" required>
+      </div>
+      <div class="form-group">
+        <label>API Key</label>
+        <input type="text" name="api_key"
+               placeholder="nakit-akim-api-key-2024-secure">
+      </div>
+    </div>
+    <div class="toggle-row" style="margin-top:14px;">
+      <input type="checkbox" name="aktif" id="aktif" value="1" checked>
+      <label for="aktif">Aktif (nakitAkim bu kaydı kullanabilir)</label>
+    </div>
+    <div style="margin-top:18px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <button type="button" id="btn-test" class="btn btn-ghost" onclick="testConnection()">
+        📡 Test Et
+      </button>
+      <button type="submit" id="btn-save" class="btn btn-primary" disabled>
+        💾 Kaydet
+      </button>
+      <button type="reset" class="btn btn-ghost" onclick="resetTestState()">↺ Temizle</button>
+    </div>
+
+    <!-- Test sonuç kutusu -->
+    <div id="test-result" style="display:none; margin-top:14px; padding:12px 16px;
+         border-radius:10px; font-size:13px; font-weight:600; line-height:1.5;">
+    </div>
+  </form>
+</div>
+
+<script>
+let testPassed = false;
+
+function resetTestState() {
+  testPassed = false;
+  document.getElementById('btn-save').disabled = true;
+  document.getElementById('btn-save').textContent = '💾 Kaydet';
+  document.getElementById('test-result').style.display = 'none';
+}
+
+async function testConnection() {
+  const url    = document.querySelector('input[name="webadmin_url"]').value.trim();
+  const apiKey = document.querySelector('input[name="api_key"]').value.trim();
+  const btn    = document.getElementById('btn-test');
+  const result = document.getElementById('test-result');
+  const saveBtn = document.getElementById('btn-save');
+
+  if (!url) {
+    result.style.display = 'block';
+    result.style.background = '#fef2f2';
+    result.style.border = '1.5px solid #fca5a5';
+    result.style.color = '#991b1b';
+    result.textContent = '⚠️  webadmin URL alanını doldurun.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Test ediliyor...';
+  result.style.display = 'block';
+  result.style.background = '#eff6ff';
+  result.style.border = '1.5px solid #bfdbfe';
+  result.style.color = '#1d4ed8';
+  result.textContent = `🔗  ${url} adresine bağlanılıyor...`;
+  saveBtn.disabled = true;
+  testPassed = false;
+
+  try {
+    const resp = await fetch('/admin/sirket-config/test', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({webadmin_url: url, api_key: apiKey})
+    });
+    const data = await resp.json();
+
+    if (data.ok) {
+      result.style.background = '#f0fdf4';
+      result.style.border = '1.5px solid #86efac';
+      result.style.color = '#065f46';
+      result.textContent = data.msg;
+      saveBtn.disabled = false;
+      saveBtn.textContent = '✅ Kaydet';
+      testPassed = true;
+    } else {
+      result.style.background = '#fef2f2';
+      result.style.border = '1.5px solid #fca5a5';
+      result.style.color = '#991b1b';
+      result.textContent = data.msg;
+      saveBtn.disabled = true;
+      saveBtn.textContent = '💾 Kaydet';
+      testPassed = false;
+    }
+  } catch(e) {
+    result.style.background = '#fef2f2';
+    result.style.border = '1.5px solid #fca5a5';
+    result.style.color = '#991b1b';
+    result.textContent = '❌  Test isteği gönderilemedi: ' + e.message;
+    saveBtn.disabled = true;
+    testPassed = false;
+  }
+
+  btn.disabled = false;
+  btn.textContent = '📡 Test Et';
+}
+</script>
+
+<!-- ── Mevcut Kayıtlar ── -->
+<div class="config-card">
+  <h2>📋 Mevcut Yapılandırmalar</h2>
+  {% if configs %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Kullanıcı</th>
+          <th>Firma Adı</th>
+          <th>webadmin URL</th>
+          <th>Durum</th>
+          <th>Son Güncelleme</th>
+          <th>İşlem</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in configs %}
+        <tr>
+          <td>{{ c.userid }}</td>
+          <td>
+            <strong>{{ c.kullanici_adi or '—' }}</strong><br>
+            <span style="font-size:11px;color:#64748b;">id: {{ c.userid }}</span>
+          </td>
+          <td>{{ c.firmaadi or '—' }}</td>
+          <td class="url-cell">{{ c.webadmin_url }}</td>
+          <td>
+            {% if c.aktif %}
+              <span class="badge badge-aktif">✅ Aktif</span>
+            {% else %}
+              <span class="badge badge-pasif">⛔ Pasif</span>
+            {% endif %}
+          </td>
+          <td style="font-size:11px;color:#64748b;">{{ c.guncelleme or '—' }}</td>
+          <td>
+            <form method="POST"
+                  action="{{ url_for('sirket_config.sirket_config_delete', config_id=c.id) }}"
+                  onsubmit="return confirm('Bu kaydı silmek istediğinizden emin misiniz?')">
+              <button type="submit" class="btn btn-danger" style="height:30px;font-size:11px;padding:0 10px;">
+                🗑 Sil
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0;">
+    Henüz kayıt yok. Yukarıdan yeni bir şirket yapılandırması ekleyin.
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}Womsis API | NakitAkım WebAdmin{% endblock %}
+{% block page_title %}Womsis API Paneli{% endblock %}
+
+{% block content %}
+<div class="womsis-grid">
+
+  <!-- API Ayarları -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" stroke="currentColor" stroke-width="2"/></svg>
+        API Bağlantı Ayarları
+      </h3>
+    </div>
+    <div class="card-body">
+      <form method="POST" id="settingsForm">
+        <input type="hidden" name="action" value="save_settings" />
+        <div class="form-group">
+          <label>API URL</label>
+          <input type="url" name="url" id="apiUrl"
+                 value="{{ bilgi.url or default_url }}"
+                 placeholder="https://developers.vomsis.com/api/v2" required />
+        </div>
+        <div class="form-group">
+          <label>App Key</label>
+          <div class="input-wrapper">
+            <input type="text" name="appkey" id="appkey"
+                   value="{{ bilgi.appkey or '' }}"
+                   placeholder="Womsis App Key" required />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Secret Key</label>
+          <div class="input-wrapper">
+            <input type="password" name="seckey" id="seckey"
+                   value="{{ bilgi.seckey or '' }}"
+                   placeholder="Womsis Secret Key" required />
+            <button type="button" class="input-toggle" onclick="togglePassword('seckey')">👁</button>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="btn btn-primary">Kaydet</button>
+          <button type="button" class="btn btn-ghost" id="testConnBtn" onclick="testWomsis()">
+            <span id="testBtnText">Bağlantı Test Et</span>
+          </button>
+        </div>
+      </form>
+
+      <div id="testResult" class="test-result mt-3 hidden"></div>
+    </div>
+  </div>
+
+  <!-- Veri Çekme Paneli -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">
+        <svg viewBox="0 0 24 24" fill="none"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" stroke="currentColor" stroke-width="2"/><polyline points="17 6 23 6 23 12" stroke="currentColor" stroke-width="2"/></svg>
+        Veri Çekme
+      </h3>
+    </div>
+    <div class="card-body">
+      <form method="POST" id="fetchForm">
+        <input type="hidden" name="action" value="fetch_data" />
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label>Başlangıç Tarihi</label>
+            <input type="date" name="start_date" value="{{ month_ago }}" id="startDate" />
+          </div>
+          <div class="form-group">
+            <label>Bitiş Tarihi</label>
+            <input type="date" name="end_date" value="{{ today }}" id="endDate" />
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-fetch" id="fetchBtn"
+                {% if not bilgi.appkey %}disabled{% endif %}>
+          <svg viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke="currentColor" stroke-width="2"/><polyline points="7 10 12 15 17 10" stroke="currentColor" stroke-width="2"/><line x1="12" y1="15" x2="12" y2="3" stroke="currentColor" stroke-width="2"/></svg>
+          Verileri Çek
+        </button>
+
+        {% if not bilgi.appkey %}
+        <p class="hint-text mt-2">⚠️ Önce API ayarlarını kaydedin.</p>
+        {% endif %}
+      </form>
+    </div>
+  </div>
+
+</div>
+
+<!-- Sonuç Tablosu -->
+{% if result %}
+<div class="card mt-4" id="resultCard">
+  <div class="card-header">
+    <h3 class="card-title">
+      {% if result.success %}
+        ✅ {{ result.count }} İşlem Bulundu
+        <span class="text-muted small">
+          ({{ result.period.start }} — {{ result.period.end }})
+        </span>
+      {% else %}
+        ❌ Hata
+      {% endif %}
+    </h3>
+    {% if result.success and result.count > 0 %}
+    <button class="btn btn-sm btn-ghost" onclick="exportCSV()">CSV İndir</button>
+    {% endif %}
+  </div>
+
+  {% if result.success and result.transactions %}
+  <div class="table-wrapper">
+    <table class="table table-sm" id="transTable">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Tarih</th>
+          <th>Banka</th>
+          <th>Hesap</th>
+          <th>Açıklama</th>
+          <th class="text-right">Tutar</th>
+          <th>Tür</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tx in result.transactions %}
+        <tr>
+          <td class="td-id">{{ loop.index }}</td>
+          <td>{{ tx.get('transactionDate', tx.get('date', '—')) }}</td>
+          <td>{{ tx.get('bankName', '—') }}</td>
+          <td>{{ tx.get('accountName', tx.get('account', '—')) }}</td>
+          <td>{{ tx.get('description', tx.get('aciklama', '—')) }}</td>
+          <td class="text-right
+            {% if tx.get('amount', tx.get('tutar', 0))|float > 0 %}text-success
+            {% else %}text-danger{% endif %}">
+            {{ tx.get('amount', tx.get('tutar', 0)) }}
+          </td>
+          <td>
+            {% set tip = tx.get('transactionType', tx.get('type', '')) %}
+            {% if tip %}
+            <span class="badge badge-sm">{{ tip }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif result.success %}
+    <div class="card-body text-center text-muted">
+      Bu tarih aralığında işlem bulunamadı.
+    </div>
+  {% else %}
+    <div class="card-body">
+      <div class="alert alert-danger">{{ result.get('message', 'Bilinmeyen hata') }}</div>
+    </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<script>
+// Womsis bağlantı testi (AJAX)
+async function testWomsis() {
+  const btn = document.getElementById('testConnBtn');
+  const txt = document.getElementById('testBtnText');
+  const res = document.getElementById('testResult');
+
+  txt.textContent = 'Test ediliyor...';
+  btn.disabled = true;
+  res.className = 'test-result mt-3';
+  res.textContent = '';
+
+  const payload = {
+    appkey: document.getElementById('appkey').value,
+    seckey: document.getElementById('seckey').value,
+    url:    document.getElementById('apiUrl').value,
+  };
+
+  try {
+    const r = await fetch('/ajax/womsis-test', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await r.json();
+    res.className = `test-result mt-3 ${data.success ? 'test-ok' : 'test-err'}`;
+    res.textContent = data.message || (data.success ? '✅ Bağlantı başarılı!' : '❌ Bağlantı hatası');
+  } catch(e) {
+    res.className = 'test-result mt-3 test-err';
+    res.textContent = '❌ İstek hatası: ' + e.message;
+  } finally {
+    txt.textContent = 'Bağlantı Test Et';
+    btn.disabled = false;
+  }
+}
+
+// CSV export
+function exportCSV() {
+  const table = document.getElementById('transTable');
+  if (!table) return;
+  const rows = [...table.querySelectorAll('tr')].map(row =>
+    [...row.querySelectorAll('th,td')].map(c => `"${c.textContent.trim()}"`).join(',')
+  );
+  const blob = new Blob([rows.join('\n')], {type: 'text/csv;charset=utf-8;'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'womsis_veriler.csv';
+  link.click();
+}
+
+// Şifre göster/gizle
+function togglePassword(id) {
+  const input = document.getElementById(id);
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+// Veri çekme butonu loading state
+document.getElementById('fetchForm')?.addEventListener('submit', function() {
+  const btn = document.getElementById('fetchBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Çekiliyor...';
+});
+</script>
+{% endblock %}

@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Dashboard | NakitAkım WebAdmin{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<!-- İstatistik Kartları -->
+<div class="stats-grid">
+  <div class="stat-card stat-purple">
+    <div class="stat-icon">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="2"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" stroke-width="2"/></svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-value">{{ stats.total_users }}</div>
+      <div class="stat-label">Toplam Kullanıcı</div>
+    </div>
+  </div>
+
+  <div class="stat-card stat-indigo">
+    <div class="stat-icon">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke="currentColor" stroke-width="2"/></svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-value">{{ stats.admin_count }}</div>
+      <div class="stat-label">Admin Kullanıcı</div>
+    </div>
+  </div>
+
+  <div class="stat-card stat-green">
+    <div class="stat-icon">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke="currentColor" stroke-width="2"/><polyline points="22 4 12 14.01 9 11.01" stroke="currentColor" stroke-width="2"/></svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-value">{{ stats.active_lisans }}</div>
+      <div class="stat-label">Aktif Lisans</div>
+    </div>
+  </div>
+
+  <div class="stat-card stat-red">
+    <div class="stat-icon">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><line x1="12" y1="8" x2="12" y2="12" stroke="currentColor" stroke-width="2"/><line x1="12" y1="16" x2="12.01" y2="16" stroke="currentColor" stroke-width="2"/></svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-value">{{ stats.expired_lisans }}</div>
+      <div class="stat-label">Süresi Dolmuş</div>
+    </div>
+  </div>
+</div>
+
+<!-- Durum Kartları -->
+<div class="cards-row">
+  <!-- DB Durumu -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">
+        <svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="5" rx="9" ry="3" stroke="currentColor" stroke-width="2"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" stroke="currentColor" stroke-width="2"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" stroke="currentColor" stroke-width="2"/></svg>
+        PostgreSQL Bağlantısı
+      </h3>
+      <button class="btn btn-sm btn-ghost" id="testDbBtn" onclick="testDb()">Test Et</button>
+    </div>
+    <div class="card-body">
+      <div class="status-row">
+        <span class="status-dot {% if db_status.success %}status-ok{% else %}status-err{% endif %}"></span>
+        <span id="dbStatusMsg">{{ db_status.message }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hızlı İşlemler -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">
+        <svg viewBox="0 0 24 24" fill="none"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" stroke="currentColor" stroke-width="2"/></svg>
+        Hızlı İşlemler
+      </h3>
+    </div>
+    <div class="card-body">
+      <div class="quick-actions">
+        <a href="{{ url_for('users') }}" class="quick-btn">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="2"/></svg>
+          Kullanıcıları Yönet
+        </a>
+        <a href="{{ url_for('womsis') }}" class="quick-btn">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" stroke="currentColor" stroke-width="2"/></svg>
+          Womsis Verisi Çek
+        </a>
+        {% if current_user.yetki == 'superadmin' %}
+        <a href="{{ url_for('settings') }}" class="quick-btn">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="currentColor" stroke-width="2"/></svg>
+          API Ayarları
+        </a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- REST API Bilgisi -->
+<div class="card mt-4">
+  <div class="card-header">
+    <h3 class="card-title">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor" stroke-width="2"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor" stroke-width="2"/></svg>
+      REST API Endpoint'leri
+    </h3>
+  </div>
+  <div class="card-body">
+    <div class="api-table">
+      <table class="table">
+        <thead>
+          <tr><th>Method</th><th>Endpoint</th><th>Açıklama</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="badge badge-post">POST</span></td>
+            <td><code>/api/womsis/sync</code></td>
+            <td>Womsis'ten veri çek (nakitAkim tetikler)</td>
+          </tr>
+          <tr>
+            <td><span class="badge badge-get">GET</span></td>
+            <td><code>/api/womsis/status</code></td>
+            <td>Son sync durumunu getir</td>
+          </tr>
+          <tr>
+            <td><span class="badge badge-post">POST</span></td>
+            <td><code>/api/womsis/test</code></td>
+            <td>Womsis bağlantı testi</td>
+          </tr>
+          <tr>
+            <td><span class="badge badge-get">GET</span></td>
+            <td><code>/api/womsis/accounts</code></td>
+            <td>Hesap listesi</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="code-block mt-3">
+      <span class="code-label">Header</span>
+      <code>X-API-Key: {{ "nakit-akim-api-key-2024-secure" }}</code>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Ayarlar | NakitAkım WebAdmin{% endblock %}
+{% block page_title %}Sistem Ayarları{% endblock %}
+
+{% block content %}
+<div class="cards-row">
+
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">REST API Güvenlik Anahtarı</h3>
+    </div>
+    <div class="card-body">
+      <p class="text-muted mb-3">nakitAkim uygulaması bu anahtarı <code>X-API-Key</code> header'ında göndererek REST API'yi tetikler.</p>
+      <div class="code-block">
+        <span class="code-label">API KEY</span>
+        <code id="apiKeyText">{{ api_key }}</code>
+        <button class="btn btn-xs btn-ghost" onclick="copyKey()">Kopyala</button>
+      </div>
+      <div class="mt-3 alert alert-info">
+        Bu anahtarı değiştirmek için <code>config.py</code> dosyasındaki <code>WEBADMIN_API_KEY</code> değerini güncelleyin veya <code>WEBADMIN_API_KEY</code> ortam değişkeni tanımlayın.
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">nakitAkim'den POST Örneği</h3>
+    </div>
+    <div class="card-body">
+      <p class="text-muted mb-3">nakitAkim projesinde Womsis verisi çekmek için aşağıdaki kodu kullanın:</p>
+      <pre class="code-block pre-code">import requests
+
+response = requests.post(
+    "http://localhost:5050/api/womsis/sync",
+    headers={"X-API-Key": "{{ api_key }}"},
+    json={
+        "userid": 1,
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31"
+    },
+    timeout=60
+)
+data = response.json()
+print(data["count"], "işlem çekildi")</pre>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">PostgreSQL Bağlantı Durumu</h3>
+      <button class="btn btn-sm btn-ghost" onclick="testDb()">Yenile</button>
+    </div>
+    <div class="card-body">
+      <div class="status-row" id="dbStatusRow">
+        <span class="status-dot {% if db_status.success %}status-ok{% else %}status-err{% endif %}"></span>
+        <span id="dbStatusMsg">{{ db_status.message }}</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function copyKey() {
+  const text = document.getElementById('apiKeyText').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('API Key kopyalandı!');
+  });
+}
+</script>
+{% endblock %}

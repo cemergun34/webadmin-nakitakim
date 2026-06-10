@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Kullanıcılar | NakitAkım WebAdmin{% endblock %}
+{% block page_title %}Kullanıcı Yönetimi{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="2"/></svg>
+      Kullanıcılar ({{ users|length }})
+    </h3>
+    <form method="GET" class="search-form" id="searchForm">
+      <div class="input-wrapper compact">
+        <svg class="input-icon" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/><line x1="21" y1="21" x2="16.65" y2="16.65" stroke="currentColor" stroke-width="2"/></svg>
+        <input type="text" name="search" placeholder="Ad, e-posta veya firma ara..."
+               value="{{ search }}" id="searchInput" />
+      </div>
+      <button type="submit" class="btn btn-sm btn-primary">Ara</button>
+      {% if search %}
+      <a href="{{ url_for('users') }}" class="btn btn-sm btn-ghost">Temizle</a>
+      {% endif %}
+    </form>
+  </div>
+
+  <div class="table-wrapper">
+    <table class="table table-hover" id="usersTable">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Kullanıcı Adı</th>
+          <th>Firma</th>
+          <th>E-posta</th>
+          <th>Yetki</th>
+          <th>Paket</th>
+          <th>Lisans Bitiş</th>
+          <th>İşlem</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr class="{% if u.yetki in ['admin','superadmin'] %}row-highlight{% endif %}">
+          <td class="td-id">#{{ u.id }}</td>
+          <td class="td-name">
+            <div class="user-avatar-sm">{{ u.kullanici_adi[0]|upper }}</div>
+            {{ u.kullanici_adi }}
+          </td>
+          <td>{{ u.firmaadi or '—' }}</td>
+          <td>{{ u.eposta or '—' }}</td>
+          <td>
+            <span class="badge
+              {% if u.yetki == 'superadmin' %}badge-superadmin
+              {% elif u.yetki == 'admin' %}badge-admin
+              {% else %}badge-user{% endif %}">
+              {{ u.yetki or 'kullanıcı' }}
+            </span>
+          </td>
+          <td>{{ u.paket_turu or '—' }}</td>
+          <td>
+            {% if u.son_odeme %}
+              {% set today = now.strftime('%Y-%m-%d') %}
+              <span class="{% if u.son_odeme < today %}text-danger{% else %}text-success{% endif %}">
+                {{ u.son_odeme }}
+              </span>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            <a href="{{ url_for('user_edit', user_id=u.id) }}" class="btn btn-xs btn-primary">
+              Düzenle
+            </a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-center text-muted">Kullanıcı bulunamadı.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
