@@ -82,37 +82,20 @@ def sync_womsis():
     body = request.get_json(silent=True) or {}
     userid = body.get("userid", 1)
 
-    # ── Aşama 0: Şirket profili (sirket_profili) tanımlı mı? ─────────────────
-    # nakitAkim'in PostgreSQL veritabanında bu kullanıcıya ait şirket kaydı
-    # yoksa Womsis verisini çekmenin anlamı yok — doğrudan hata döndür.
+    # ── Aşama 0: Şirket profili (sirket_profili) kontrolü — sadece uyarı ──────
     try:
         from db.connection import get_connection
         _conn = get_connection()
         try:
             _sp = _conn.execute(
-                """SELECT id, unvan, vergino
-                   FROM sirket_profili
-                   WHERE userid=%s LIMIT 1""",
+                "SELECT id FROM sirket_profili WHERE userid=%s LIMIT 1",
                 (userid,)
             ).fetchone()
-            _sirket_ok = (
-                _sp is not None and
-                bool((_sp.get("vergino") or _sp.get("unvan") or "").strip())
-            )
+            if _sp is None:
+                logger.warning("sirket_profili bulunamadı — userid=%s (sync devam ediyor)", userid)
         finally:
             _conn.close()
-
-        if not _sirket_ok:
-            logger.warning("sirket_profili bulunamadı — userid=%s", userid)
-            return jsonify({
-                "success":    False,
-                "error_code": "no_sirket_profili",
-                "error":      "Önce iqDenetim üzerinden kullanıcı tanımının yapılması gerekir."
-                              " Şirket profili tanımlanmadan Womsis verisi çekilemez."
-            }), 422
-
     except Exception as _sp_exc:
-        # sirket_profili tablosu yoksa (eski kurulum) kontrol atlanır
         logger.debug("sirket_profili kontrol hatası (atlandı): %s", _sp_exc)
 
     # Tarih aralığı
