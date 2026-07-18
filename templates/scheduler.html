@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+{% block title %}Otomatik Sync | NakitAkım WebAdmin{% endblock %}
+{% block page_title %}Otomatik Womsis Sync{% endblock %}
+
+{% block content %}
+<style>
+.sched-grid {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media(max-width:860px){ .sched-grid{grid-template-columns:1fr;} }
+
+/* Durum badge */
+.status-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 14px; border-radius: 20px;
+  font-size: 12px; font-weight: 700;
+}
+.status-badge.running  { background:#ede9fe; color:#4c1d95; }
+.status-badge.success  { background:#dcfce7; color:#166534; }
+.status-badge.warning  { background:#fef9c3; color:#854d0e; }
+.status-badge.partial  { background:#ffedd5; color:#9a3412; }
+.status-badge.error    { background:#fee2e2; color:#991b1b; }
+.status-badge.inactive { background:#f1f5f9; color:#64748b; }
+.dot { width:8px; height:8px; border-radius:50%; background:currentColor; }
+
+/* Saat seçici */
+.time-picker {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 8px;
+}
+.time-picker input[type=number] {
+  width: 64px; height: 44px;
+  background: #f8fafc; border: 1.5px solid #e2e8f0;
+  border-radius: 10px; text-align: center;
+  font-size: 22px; font-weight: 700; color: #1e293b;
+}
+.time-picker input[type=number]:focus { border-color: #6366f1; outline: none; }
+.time-sep { font-size: 24px; font-weight: 800; color: #94a3b8; }
+
+/* Log tablosu */
+.log-table { width:100%; border-collapse:collapse; font-size:13px; }
+.log-table th {
+  background:#f8fafc; color:#374151; font-weight:600;
+  padding:10px 14px; text-align:left;
+  border-bottom:1.5px solid #e5e7eb; white-space:nowrap;
+}
+.log-table td {
+  padding:9px 14px; border-bottom:1px solid #f1f5f9;
+  color:#374151; vertical-align:middle;
+}
+.log-table tr:hover td { background:#fafafa; }
+.durum-chip {
+  display:inline-block; font-size:11px; font-weight:600;
+  padding:2px 10px; border-radius:20px;
+}
+.durum-chip.success { background:#dcfce7; color:#166534; }
+.durum-chip.error   { background:#fee2e2; color:#991b1b; }
+.durum-chip.partial { background:#ffedd5; color:#9a3412; }
+.durum-chip.warning { background:#fef9c3; color:#854d0e; }
+.durum-chip.running { background:#ede9fe; color:#4c1d95; }
+
+/* Bilgi kutusu */
+.info-box {
+  background: #f0f9ff; border: 1px solid #bae6fd;
+  border-radius: 10px; padding: 14px 16px;
+  font-size: 12.5px; color: #0c4a6e;
+  line-height: 1.7;
+}
+.info-box b { color: #0369a1; }
+</style>
+
+<div class="sched-grid">
+
+  <!-- SOL: Ayar Kartı -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">
+        <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          <polyline points="12 6 12 12 16 14" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        Zamanlayıcı Ayarları
+      </h3>
+    </div>
+    <div class="card-body">
+
+      <!-- Mevcut Durum -->
+      <div style="margin-bottom:18px;">
+        <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">DURUM</div>
+        {% if state.running %}
+          <span class="status-badge running">
+            <span class="dot" style="animation:pulse 1.5s infinite;"></span>
+            Aktif — Her gün {{ '%02d'|format(state.hour) }}:{{ '%02d'|format(state.minute) }}'de çalışır
+          </span>
+        {% else %}
+          <span class="status-badge inactive"><span class="dot"></span>Pasif</span>
+        {% endif %}
+      </div>
+
+      {% if state.next_run %}
+      <div style="margin-bottom:18px;">
+        <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">SONRAKİ ÇALIŞMA</div>
+        <div style="font-size:14px;color:#1e293b;font-weight:700;">⏰  {{ state.next_run }}</div>
+      </div>
+      {% endif %}
+
+      {% if state.last_run %}
+      <div style="margin-bottom:18px;">
+        <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">SON ÇALIŞMA</div>
+        <div style="font-size:13px;color:#374151;">{{ state.last_run }}</div>
+        <div style="font-size:12px;margin-top:4px;">
+          {% if state.last_status == 'success' %}
+            <span class="durum-chip success">✅ Başarılı</span>
+          {% elif state.last_status == 'partial' %}
+            <span class="durum-chip partial">⚠️ Kısmi</span>
+          {% elif state.last_status == 'error' %}
+            <span class="durum-chip error">❌ Hata</span>
+          {% elif state.last_status == 'warning' %}
+            <span class="durum-chip warning">⚠️ Uyarı</span>
+          {% elif state.last_status == 'running' %}
+            <span class="durum-chip running">🔄 Çalışıyor</span>
+          {% endif %}
+        </div>
+        {% if state.last_message %}
+        <div style="font-size:11.5px;color:#64748b;margin-top:6px;">{{ state.last_message }}</div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <!-- Saat Ayarı Formu -->
+      <form method="POST" id="schedForm">
+        <input type="hidden" name="action" value="set_schedule" />
+        <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px;">
+          ÇALIŞMA SAATİ
+        </div>
+        <div class="time-picker">
+          <input type="number" name="hour" id="hourInp"
+                 min="0" max="23" value="{{ state.hour }}"
+                 title="Saat (0–23)" />
+          <span class="time-sep">:</span>
+          <input type="number" name="minute" id="minuteInp"
+                 min="0" max="59" value="{{ state.minute }}"
+                 title="Dakika (0–59)" />
+        </div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:6px;">
+          Her gün bu saatte otomatik çalışır (24 saat formatı)
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+          <button type="submit" class="btn btn-primary" style="flex:1;">
+            💾 Saati Kaydet &amp; Yeniden Başlat
+          </button>
+        </div>
+      </form>
+
+      <!-- Manuel Tetikleme -->
+      <div style="margin-top:14px;">
+        <form method="POST">
+          <input type="hidden" name="action" value="run_now" />
+          <button type="submit" class="btn btn-ghost" style="width:100%;"
+                  onclick="return confirm('Womsis sync şimdi çalıştırılsın mı?')">
+            ⚡ Şimdi Çalıştır
+          </button>
+        </form>
+      </div>
+
+      <!-- Bilgi Kutusu -->
+      <div class="info-box" style="margin-top:18px;">
+        <b>Nasıl çalışır?</b><br>
+        webadmin açık olduğu sürece her gece belirlenen saatte
+        tüm kullanıcıların Womsis banka hareketleri otomatik çekilir
+        ve <b>womsis_sync_log</b> tablosuna kaydedilir.<br><br>
+        <b>Not:</b> webadmin kapatılırsa zamanlayıcı durur.
+        Windows'ta otomatik çalışması için Görev Zamanlayıcısı
+        ile <code>python app.py</code>'yi sistem başlangıcında başlatabilirsiniz.
+      </div>
+    </div>
+  </div>
+
+  <!-- SAĞ: Log Tablosu -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">
+        <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                stroke="currentColor" stroke-width="2"/>
+          <polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2"/>
+          <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" stroke-width="2"/>
+          <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" stroke-width="2"/>
+          <polyline points="10 9 9 9 8 9" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        Sync Geçmişi
+      </h3>
+      <span style="font-size:12px;color:#94a3b8;">Son 50 kayıt</span>
+    </div>
+    <div style="overflow-x:auto;">
+      {% if logs %}
+      <table class="log-table">
+        <thead>
+          <tr>
+            <th>Zaman</th>
+            <th>Kullanıcı</th>
+            <th>Çekilen</th>
+            <th>Durum</th>
+            <th>Mesaj</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in logs %}
+          <tr>
+            <td style="white-space:nowrap;color:#64748b;font-size:12px;">
+              {{ log.kayit_zamani.strftime('%d.%m.%Y %H:%M') if log.kayit_zamani else '—' }}
+            </td>
+            <td>
+              <span style="background:#ede9fe;color:#4c1d95;font-size:11px;font-weight:700;
+                           padding:2px 8px;border-radius:10px;">
+                #{{ log.userid }}
+              </span>
+            </td>
+            <td style="font-weight:700;color:#2563eb;">{{ log.cekilen }}</td>
+            <td>
+              <span class="durum-chip {{ log.durum }}">
+                {% if log.durum == 'success' %}✅{% elif log.durum == 'error' %}❌{% elif log.durum == 'partial' %}⚠️{% else %}ℹ️{% endif %}
+                {{ log.durum }}
+              </span>
+            </td>
+            <td style="color:#64748b;font-size:12px;max-width:300px;overflow:hidden;
+                       text-overflow:ellipsis;white-space:nowrap;"
+                title="{{ log.mesaj }}">
+              {{ log.mesaj }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div style="text-align:center;padding:40px 20px;color:#94a3b8;">
+        <svg viewBox="0 0 24 24" fill="none" width="36" height="36"
+             style="margin:0 auto 12px;display:block;opacity:.4;">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                stroke="currentColor" stroke-width="2"/>
+          <polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        Henüz sync geçmişi yok.<br>
+        <small>Zamanlayıcı çalıştığında burada görünecek.</small>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<style>
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+</style>
+{% endblock %}

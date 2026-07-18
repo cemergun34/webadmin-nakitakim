@@ -32,6 +32,10 @@ from services.vomsis_service import (
 )
 from api.womsis_api import womsis_bp
 from api.sirket_config import sirket_config_bp
+from services.scheduler_service import (
+    start_scheduler, stop_scheduler, run_womsis_sync_job,
+    get_scheduler_state, get_sync_logs,
+)
 
 # ── Loglama ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -282,6 +286,46 @@ def settings():
                            db_status=test_connection())
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# ZAMANLAYICI YÖNETİMİ  (Otomatik Womsis Sync)
+# ────────────────────────────────────────────────────────────────────────────
+
+@app.route("/scheduler", methods=["GET", "POST"])
+@login_required
+def scheduler():
+    """Otomatik Womsis sync zamanlayıcısını yönetir."""
+    if request.method == "POST":
+        action = request.form.get("action")
+
+        if action == "set_schedule":
+            try:
+                hour   = int(request.form.get("hour",   0))
+                minute = int(request.form.get("minute", 0))
+                hour   = max(0, min(23, hour))
+                minute = max(0, min(59, minute))
+                stop_scheduler()                        # Önce durdur
+                import time; time.sleep(0.2)            # Thread'in durmasını bekle
+                start_scheduler(hour=hour, minute=minute)  # Yeni saatle başlat
+                flash(
+                    f"✅  Zamanlayıcı ayarlandı: her gün {hour:02d}:{minute:02d}'de çalışacak.",
+                    "success"
+                )
+            except (ValueError, TypeError):
+                flash("Geçersiz saat/dakika değeri.", "danger")
+
+        elif action == "run_now":
+            import threading
+            t = threading.Thread(target=run_womsis_sync_job, daemon=True)
+            t.start()
+            flash("⚡  Womsis sync başlatıldı — arka planda çalışıyor.", "success")
+
+        return redirect(url_for("scheduler"))
+
+    state = get_scheduler_state()
+    logs  = get_sync_logs(limit=50)
+    return render_template("scheduler.html", state=state, logs=logs)
+
+
 # ── Context processor ─────────────────────────────────────────────────────────
 @app.context_processor
 def inject_globals():
@@ -318,6 +362,11 @@ if __name__ == "__main__":
         proto = "http"
         logger.info("ℹ️   SSL sertifikası bulunamadı — HTTP modunda başlatılıyor.")
         logger.info("    HTTPS için nakitAkim → Eklentiler → webadmin Ayarları → Sertifika Oluştur")
+
+    # ── Otomatik Womsis Zamanlayıcısı — gece 00:00'da başlar ─────────────────
+    # Saati değiştirmek için webadmin → Zamanlayıcı sayfasını kullanın.
+    # Veya burada start_scheduler(hour=X, minute=Y) ile override edebilirsiniz.
+    start_scheduler(hour=0, minute=0)
 
     logger.info(f"webadmin-nakitAkim başlatılıyor → {proto}://{HOST}:{PORT}")
     app.run(
