@@ -6,6 +6,11 @@ Tüm ortam değişkenleri ve sabit ayarlar burada.
 """
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# .env dosyasını yükle (app klasöründen)
+_ENV_FILE = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=_ENV_FILE, override=True)
 
 # ── Temel ────────────────────────────────────────────────────────────────────
 SECRET_KEY = os.environ.get("WEBADMIN_SECRET_KEY", "webadmin-nakit-akim-gizli-anahtar-2024")
