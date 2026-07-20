@@ -103,7 +103,7 @@ def sync_womsis():
         end_dt = datetime.now()
         if body.get("end_date"):
             end_dt = datetime.strptime(body["end_date"], "%Y-%m-%d")
-        start_dt = end_dt - timedelta(days=30)
+        start_dt = datetime(2026, 1, 1)  # Baştan sona çek
         if body.get("start_date"):
             start_dt = datetime.strptime(body["start_date"], "%Y-%m-%d")
     except ValueError as e:

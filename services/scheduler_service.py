@@ -172,9 +172,9 @@ def run_womsis_sync_job():
     _scheduler_state["last_status"] = "running"
     _scheduler_state["last_message"] = "İşlem devam ediyor..."
 
-    # Son 1 günün verilerini çek (gece 12 çalışıyor, dünü kapsar)
+    # Baştan sona çek: 2026-01-01'den bugüne
     end_dt   = now.replace(hour=23, minute=59, second=59)
-    start_dt = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0)
+    start_dt = datetime(2026, 1, 1, 0, 0, 0)
 
     userids = _get_all_userids()
     if not userids:
