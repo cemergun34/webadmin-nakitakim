@@ -235,8 +235,29 @@ def womsis():
                 transactions = vomsis_get_all_transactions_chunked(url, token, start_dt, end_dt)
                 
                 # ── DB'ye kaydet (womsis_banka) ──────────────────────────────
-                from services.scheduler_service import _save_womsis_to_db
+                from services.scheduler_service import _save_womsis_to_db, _save_womsis_pos_to_db
+                from services.vomsis_service import vomsis_get_terminals, vomsis_get_terminal_transactions
+                
                 saved, skipped = _save_womsis_to_db(transactions, userid=1, musterino=1)
+                
+                # ── POS Verilerini Çek ve Kaydet (Manuel Tetikleme) ───────────
+                terminals = vomsis_get_terminals(url, token)
+                pos_txs_total = []
+                pos_saved = 0
+                pos_skipped = 0
+
+                if terminals:
+                    b_str = start_dt.strftime("%d-%m-%Y %H:%M:%S")
+                    e_str = end_dt.strftime("%d-%m-%Y %H:%M:%S")
+                    for term in terminals:
+                        t_id = term.get("terminalId") or term.get("id")
+                        if t_id:
+                            term_txs = vomsis_get_terminal_transactions(url, token, t_id, b_str, e_str)
+                            if term_txs:
+                                pos_txs_total.extend(term_txs)
+                                ps, psk = _save_womsis_pos_to_db(term_txs, t_id, userid=1, musterino=1)
+                                pos_saved += ps
+                                pos_skipped += psk
                 
                 result = {
                     "success": True,
@@ -244,12 +265,15 @@ def womsis():
                     "count": len(transactions),
                     "saved": saved,
                     "skipped": skipped,
+                    "pos_count": len(pos_txs_total),
+                    "pos_saved": pos_saved,
+                    "pos_skipped": pos_skipped,
                     "period": {
                         "start": start_dt.strftime("%Y-%m-%d"),
                         "end":   end_dt.strftime("%Y-%m-%d"),
                     }
                 }
-                flash(f"{len(transactions)} işlem başarıyla çekildi. ({saved} eklendi, {skipped} atlandı)", "success")
+                flash(f"Banka: {len(transactions)} ({saved} ek, {skipped} atl). POS: {len(pos_txs_total)} ({pos_saved} ek, {pos_skipped} atl).", "success")
 
     return render_template("womsis.html",
                            bilgi=bilgi,
