@@ -130,14 +130,36 @@ def _sync_user(userid: int, start_dt: datetime, end_dt: datetime) -> dict:
         txs = vomsis_get_all_transactions_chunked(api_url, token, start_dt, end_dt)
         
         # ── DB'ye kaydet (womsis_banka) ──────────────────────────────────────
-        # Her zaman userid=1 ve musterino=1 olarak kaydediyoruz.
         saved, skipped = _save_womsis_to_db(txs, userid=1, musterino=1)
         
+        # ── POS Verilerini Çek ve Kaydet ─────────────────────────────────────
+        from services.vomsis_service import vomsis_get_terminals, vomsis_get_terminal_transactions
+        terminals = vomsis_get_terminals(api_url, token)
+        pos_txs_total = []
+        pos_saved = 0
+        pos_skipped = 0
+
+        if terminals:
+            # beginDate / endDate string format for POS
+            b_str = start_dt.strftime("%d-%m-%Y %H:%M:%S")
+            e_str = end_dt.strftime("%d-%m-%Y %H:%M:%S")
+            for term in terminals:
+                t_id = term.get("terminalId") or term.get("id")
+                if t_id:
+                    term_txs = vomsis_get_terminal_transactions(api_url, token, t_id, b_str, e_str)
+                    if term_txs:
+                        pos_txs_total.extend(term_txs)
+                        ps, psk = _save_womsis_pos_to_db(term_txs, t_id, userid=1, musterino=1)
+                        pos_saved += ps
+                        pos_skipped += psk
+
         return {
             "success": True,
             "count":   len(txs),
-            "message": f"{len(txs)} işlem çekildi. ({saved} yeni eklendi, {skipped} atlandı)",
+            "pos_count": len(pos_txs_total),
+            "message": f"Banka: {len(txs)} ({saved} ek, {skipped} atl). POS: {len(pos_txs_total)} ({pos_saved} ek, {pos_skipped} atl).",
             "data":    txs,
+            "pos_data": pos_txs_total
         }
     except Exception as e:
         return {"success": False, "count": 0, "message": str(e)}
@@ -223,6 +245,104 @@ def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) 
         conn.close()
     except Exception as e:
         logger.error('womsis DB kayit hatasi: %s', e, exc_info=True)
+        try:
+            conn.rollback()
+            conn.close()
+        except Exception:
+            pass
+
+    return saved, skipped
+
+
+def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int = 1, musterino: int = 1) -> tuple[int, int]:
+    """
+    Womsis POS işlemlerini womsi_pos tablosuna kaydeder.
+    Mükerrer kayıt engellemek için kontrol yapar.
+    """
+    if not transactions:
+        return 0, 0
+
+    saved   = 0
+    skipped = 0
+    now     = datetime.now()
+
+    try:
+        from db.connection import get_connection
+        conn = get_connection()
+        cur  = conn.cursor()
+
+        for tx in transactions:
+            # Temel alanları JSON'dan al
+            raw_tarih = str(tx.get('transactionDate') or tx.get('date') or '')
+            tarih_iso = now.strftime('%Y-%m-%d %H:%M:%S')
+            for fmt in ('%d-%m-%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+                try:
+                    tarih_iso = datetime.strptime(raw_tarih[:len(fmt)], fmt).strftime('%Y-%m-%d %H:%M:%S')
+                    break
+                except Exception:
+                    continue
+            
+            hesaba_gecis = str(tx.get('valueDate') or tx.get('paymentDate') or '')
+            if hesaba_gecis:
+                for fmt in ('%d-%m-%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d', '%d-%m-%Y'):
+                    try:
+                        hesaba_gecis = datetime.strptime(hesaba_gecis[:len(fmt)], fmt).strftime('%Y-%m-%d')
+                        break
+                    except Exception:
+                        pass
+                        
+            # Rakamlar
+            islemtutari = float(tx.get('transactionAmount') or tx.get('amount') or tx.get('islemtutari') or 0)
+            isyeriucreti = float(tx.get('merchantCommissionAmount') or tx.get('commission') or tx.get('isyeriucretitutar') or 0)
+            nettutar = float(tx.get('netAmount') or tx.get('net') or tx.get('nettutar') or 0)
+            
+            # Kart ve POS bilgileri
+            posno = str(tx.get('terminalNo') or tx.get('posNo') or posno_fallback or '')
+            brand = str(tx.get('cardBrand') or tx.get('brand') or '')
+            kartno = str(tx.get('maskedCardNumber') or tx.get('cardNumber') or tx.get('kartno') or '')
+            islemtipi = str(tx.get('transactionType') or tx.get('type') or '')
+            isyerino = str(tx.get('merchantNo') or tx.get('isyerino') or '')
+            aciklama = str(tx.get('description') or tx.get('aciklama') or '')[:255]
+
+            # Mükerrer kontrolü
+            # POS'ta uniq id yoksa tarih, tutar ve kartno ile kontrol et
+            tx_id = str(tx.get('id') or tx.get('transactionId') or '')
+            if tx_id:
+                cur.execute('SELECT id FROM womsi_pos WHERE kayittarihi = %s AND userid = %s LIMIT 1', (tx_id, userid))
+                if cur.fetchone():
+                    skipped += 1
+                    continue
+            else:
+                cur.execute(
+                    'SELECT id FROM womsi_pos WHERE userid=%s AND islemtarihi=%s AND islemtutari=%s AND kartno=%s LIMIT 1',
+                    (userid, tarih_iso, islemtutari, kartno)
+                )
+                if cur.fetchone():
+                    skipped += 1
+                    continue
+
+            # Tabloya kaydet (kayittarihi alanına uniq tx_id koyuyoruz ki sonraki çekimde kontrol edilebilsin)
+            cur.execute("""
+                INSERT INTO womsi_pos
+                    (userid, islemtutari, isyeriucretitutar, nettutar, musterino,
+                     islemtarihi, posno, kayittarihi, islemtarih, brand,
+                     kartno, islemtipi, isyerino, carihesap, hesabagecistarihi, aciklama)
+                VALUES
+                    (%s, %s, %s, %s, %s,
+                     %s, %s, %s, %s, %s,
+                     %s, %s, %s, %s, %s, %s)
+            """, (
+                userid, islemtutari, isyeriucreti, nettutar, musterino,
+                tarih_iso, posno, tx_id, tarih_iso[:10], brand,
+                kartno, islemtipi, isyerino, '-', hesaba_gecis, aciklama
+            ))
+            saved += 1
+
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error('womsi_pos DB kayit hatasi: %s', e, exc_info=True)
         try:
             conn.rollback()
             conn.close()
