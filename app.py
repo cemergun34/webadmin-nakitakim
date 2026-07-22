@@ -233,16 +233,23 @@ def womsis():
                 flash(f"Token alınamadı: {err}", "danger")
             else:
                 transactions = vomsis_get_all_transactions_chunked(url, token, start_dt, end_dt)
+                
+                # ── DB'ye kaydet (womsis_banka) ──────────────────────────────
+                from services.scheduler_service import _save_womsis_to_db
+                saved, skipped = _save_womsis_to_db(transactions, userid=1, musterino=1)
+                
                 result = {
                     "success": True,
                     "transactions": transactions,
                     "count": len(transactions),
+                    "saved": saved,
+                    "skipped": skipped,
                     "period": {
                         "start": start_dt.strftime("%Y-%m-%d"),
                         "end":   end_dt.strftime("%Y-%m-%d"),
                     }
                 }
-                flash(f"{len(transactions)} işlem başarıyla çekildi.", "success")
+                flash(f"{len(transactions)} işlem başarıyla çekildi. ({saved} eklendi, {skipped} atlandı)", "success")
 
     return render_template("womsis.html",
                            bilgi=bilgi,
