@@ -1,554 +1,377 @@
+# -*- coding: utf-8 -*-
 """
-webadmin-nakitakim Flask Uygulamasi
-Port: 5050 (WEBADMIN_PORT env ile degistirilebilir)
+webadmin-nakitAkim — Flask Ana Uygulama
+========================================
+Çalıştırmak için: python app.py
+Varsayılan port: 5050
 """
-import os
-import hashlib
+from __future__ import annotations
+
 import logging
+import os
 from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import (
-    Flask, request, jsonify, session,
-    render_template_string, redirect, url_for
+    Flask, render_template, request, redirect, url_for,
+    session, flash, jsonify, g
 )
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+from config import SECRET_KEY, DEBUG, PORT, HOST, WEBADMIN_API_KEY
+from db.connection import test_connection
+from services.user_service import (
+    get_all_users, get_user_by_id, update_user_yetki,
+    update_user_lisans, reset_user_password, update_user_full,
+    get_stats, verify_admin_login,
+)
+from services.vomsis_service import (
+    get_vomsis_bilgileri, save_vomsis_bilgileri,
+    vomsis_authenticate, vomsis_get_all_transactions_chunked,
+    vomsis_get_accounts, vomsis_get_banks,
+    vomsis_test_connection, DEFAULT_API_URL,
+)
+from api.womsis_api import womsis_bp
+from api.sirket_config import sirket_config_bp
+from services.scheduler_service import (
+    start_scheduler, stop_scheduler, run_womsis_sync_job,
+    get_scheduler_state, get_sync_logs,
+)
+
+# ── Loglama ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
-    format='[%(asctime)s] %(levelname)s: %(message)s',
-    datefmt='%H:%M:%S'
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
-logger = logging.getLogger('webadmin')
-
-# ── Config (ortam degiskenlerinden oku) ───────────────────────────────────────
-SECRET_KEY = os.environ.get('WEBADMIN_SECRET_KEY', 'fallback-secret-key-change-me')
-DEBUG      = os.environ.get('WEBADMIN_DEBUG', 'false').lower() == 'true'
-PORT       = int(os.environ.get('WEBADMIN_PORT', 5050))
-HOST       = os.environ.get('WEBADMIN_HOST', '0.0.0.0')
-API_KEY    = os.environ.get('WEBADMIN_API_KEY', 'nakit-akim-api-key-2024-secure')
-
-PG_HOST    = os.environ.get('PG_HOST', '127.0.0.1')
-PG_PORT    = int(os.environ.get('PG_PORT', 5432))
-PG_DB      = os.environ.get('PG_DB', 'neondb')
-PG_USER    = os.environ.get('PG_USER', 'postgres')
-PG_PASS    = os.environ.get('PG_PASS', '123')
-PG_SSLMODE = os.environ.get('PG_SSLMODE', 'disable')
+logger = logging.getLogger(__name__)
 
 # ── Flask App ─────────────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+app.config["WEBADMIN_API_KEY"] = WEBADMIN_API_KEY
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
+
+# Blueprint kayıt
+app.register_blueprint(womsis_bp)
+app.register_blueprint(sirket_config_bp)
 
 
-# ── DB Baglantisi ─────────────────────────────────────────────────────────────
-def get_db():
-    import psycopg2
-    conn = psycopg2.connect(
-        host=PG_HOST,
-        port=PG_PORT,
-        dbname=PG_DB,
-        user=PG_USER,
-        password=PG_PASS,
-        sslmode=PG_SSLMODE,
-        connect_timeout=10
-    )
-    return conn
-
-
-# ── Dekoratörler ─────────────────────────────────────────────────────────────
-def require_api_key(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        key = request.headers.get('X-API-Key')
-        if key != API_KEY:
-            return jsonify({'success': False, 'error': 'Unauthorized - Gecersiz API Key'}), 401
-        return f(*args, **kwargs)
-    return decorated
-
-
+# ── Auth dekoratörü ───────────────────────────────────────────────────────────
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('login'))
+        if "user_id" not in session:
+            flash("Lütfen giriş yapın.", "warning")
+            return redirect(url_for("login"))
         return f(*args, **kwargs)
     return decorated
 
 
-# ── HTML Sablonlar ────────────────────────────────────────────────────────────
-LOGIN_HTML = """
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>IQ Finans - Webadmin Giris</title>
-<style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-    font-family: 'Segoe UI', Arial, sans-serif;
-    background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%);
-    display: flex; align-items: center; justify-content: center;
-    min-height: 100vh;
-}
-.card {
-    background: #16213e;
-    border: 1px solid #0f3460;
-    border-radius: 16px;
-    padding: 44px 40px;
-    width: 400px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-}
-.logo { color: #e94560; font-size: 26px; font-weight: 700; margin-bottom: 4px; }
-.sub  { color: #6677aa; font-size: 13px; margin-bottom: 32px; }
-label { display: block; color: #9999bb; font-size: 12px; font-weight: 600;
-        text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-input {
-    width: 100%; padding: 12px 16px;
-    background: #0a1628; border: 1px solid #1e3a5f;
-    border-radius: 8px; color: #fff; font-size: 14px;
-    margin-bottom: 20px; outline: none; transition: border 0.2s;
-}
-input:focus { border-color: #e94560; }
-button {
-    width: 100%; padding: 13px;
-    background: #e94560; border: none; border-radius: 8px;
-    color: #fff; font-size: 15px; font-weight: 700;
-    cursor: pointer; transition: background 0.2s; letter-spacing: 0.5px;
-}
-button:hover { background: #c73652; }
-.error {
-    background: rgba(233,69,96,0.15);
-    border: 1px solid #e94560;
-    border-radius: 8px; padding: 12px 16px;
-    color: #e94560; font-size: 13px; margin-bottom: 20px;
-}
-</style>
-</head>
-<body>
-<div class="card">
-  <div class="logo">IQ Finans</div>
-  <div class="sub">Webadmin Yonetim Paneli</div>
-  {% if error %}<div class="error">{{ error }}</div>{% endif %}
-  <form method="post" autocomplete="off">
-    <label>Kullanici Adi</label>
-    <input type="text" name="username" placeholder="kullanici adi veya e-posta" autofocus required>
-    <label>Sifre</label>
-    <input type="password" name="password" placeholder="sifreniz" required>
-    <button type="submit">GIRIS YAP</button>
-  </form>
-</div>
-</body>
-</html>
-"""
+# ────────────────────────────────────────────────────────────────────────────
+# AUTH
+# ────────────────────────────────────────────────────────────────────────────
 
-DASHBOARD_HTML = """
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-<meta charset="UTF-8">
-<title>IQ Finans - Webadmin</title>
-<style>
-body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1a2e; color: #eee; padding: 40px; }
-h1   { color: #e94560; margin-bottom: 20px; }
-.box { background: #16213e; border: 1px solid #0f3460; border-radius: 10px; padding: 24px; margin-bottom: 16px; }
-.key { color: #6677aa; font-size: 12px; }
-.val { color: #fff; font-size: 14px; font-weight: 600; margin-top: 2px; }
-a    { color: #e94560; text-decoration: none; }
-a:hover { text-decoration: underline; }
-</style>
-</head>
-<body>
-<h1>Webadmin Paneli</h1>
-<div class="box">
-  <div class="key">Hosgeldiniz</div>
-  <div class="val">{{ username }}</div>
-</div>
-<div class="box">
-  <div class="key">Sunucu</div>
-  <div class="val">http://{{ host }}:{{ port }}</div>
-  <div class="key" style="margin-top:12px">Veritabani</div>
-  <div class="val">{{ pg_db }} @ {{ pg_host }}</div>
-  <div class="key" style="margin-top:12px">API Endpoint</div>
-  <div class="val">POST /api/womsis/sync</div>
-</div>
-<a href="/logout">Cikis Yap</a>
-</body>
-</html>
-"""
-
-
-# ── Web Route'lari ────────────────────────────────────────────────────────────
-@app.route('/')
+@app.route("/", methods=["GET"])
 def index():
-    if 'user_id' in session:
-        return redirect(url_for('dashboard'))
-    return redirect(url_for('login'))
+    if "user_id" in session:
+        return redirect(url_for("dashboard"))
+    return redirect(url_for("login"))
 
 
-@app.route('/login', methods=['GET', 'POST'])
+@app.route("/login", methods=["GET", "POST"])
 def login():
-    error = None
-    if request.method == 'POST':
-        username = (request.form.get('username') or '').strip()
-        password = (request.form.get('password') or '').strip()
-        user = _authenticate(username, password)
+    if "user_id" in session:
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "").strip()
+
+        user = verify_admin_login(username, password)
         if user:
-            session['user_id']   = user['id']
-            session['username']  = user['kullanici_adi']
-            session['musterino'] = user.get('musterino', 1)
-            logger.info('Giris basarili: %s', username)
-            return redirect(url_for('dashboard'))
-        error = 'Kullanici adi veya sifre yanlis.'
-        logger.warning('Basarisiz giris denemesi: %s', username)
-    return render_template_string(LOGIN_HTML, error=error)
+            session.permanent = True
+            session["user_id"]   = user["id"]
+            session["username"]  = user["kullanici_adi"]
+            session["yetki"]     = user["yetki"]
+            session["firmaadi"]  = user.get("firmaadi", "")
+            flash(f"Hoş geldiniz, {user['kullanici_adi']}!", "success")
+            return redirect(url_for("dashboard"))
+        else:
+            flash("Kullanıcı adı veya şifre hatalı.", "danger")
+
+    return render_template("login.html")
 
 
-@app.route('/dashboard')
-@login_required
-def dashboard():
-    return render_template_string(
-        DASHBOARD_HTML,
-        username=session.get('username', ''),
-        host=PG_HOST, port=PORT,
-        pg_db=PG_DB, pg_host=PG_HOST
-    )
-
-
-@app.route('/logout')
+@app.route("/logout")
 def logout():
     session.clear()
-    return redirect(url_for('login'))
+    flash("Çıkış yapıldı.", "info")
+    return redirect(url_for("login"))
 
 
-# ── API Route'lari ────────────────────────────────────────────────────────────
-@app.route('/api/womsis/sync', methods=['POST'])
-@require_api_key
-def api_womsis_sync():
-    try:
-        data      = request.get_json() or {}
-        userid    = int(data.get('userid', 1))
-        musterino = int(data.get('musterino', 1))
-        start     = data.get('start_date') or (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-        end       = data.get('end_date')   or datetime.now().strftime('%Y-%m-%d')
+# ────────────────────────────────────────────────────────────────────────────
+# DASHBOARD
+# ────────────────────────────────────────────────────────────────────────────
 
-        creds = _get_womsis_creds(userid)
-        if not creds:
-            return jsonify({
-                'success': False,
-                'error_code': 'no_sirket_profili',
-                'error': 'Bu kullanici icin Womsis bilgisi tanimli degil.'
-            })
-
-        start_dt = datetime.strptime(start, '%Y-%m-%d')
-        end_dt   = datetime.strptime(end,   '%Y-%m-%d').replace(hour=23, minute=59, second=59)
-
-        transactions = _fetch_womsis_transactions(
-            creds['url'], creds['appkey'], creds['seckey'],
-            start_dt, end_dt
-        )
-
-        # ── DB'ye kaydet (womsis_banka) ──────────────────────────────────────
-        saved, skipped = _save_womsis_to_db(transactions, userid=userid, musterino=musterino)
-        logger.info('womsis/sync: %d cekildi, %d kaydedildi, %d atlandı (userid=%d, musterino=%d)',
-                    len(transactions), saved, skipped, userid, musterino)
-
-        return jsonify({
-            'success':      True,
-            'count':        len(transactions),
-            'saved':        saved,
-            'skipped':      skipped,
-            'timestamp':    datetime.now().isoformat(),
-            'period':       {'start': start, 'end': end}
-        })
-
-    except Exception as e:
-        logger.error('womsis/sync hatasi: %s', e, exc_info=True)
-        return jsonify({'success': False, 'error': str(e)}), 500
+@app.route("/dashboard")
+@login_required
+def dashboard():
+    stats = get_stats()
+    db_status = test_connection()
+    return render_template("dashboard.html",
+                           stats=stats,
+                           db_status=db_status,
+                           now=datetime.now())
 
 
-@app.route('/api/womsis/test', methods=['POST'])
-@require_api_key
-def api_womsis_test():
-    try:
-        data   = request.get_json() or {}
-        userid = int(data.get('userid', 1))
-        creds  = _get_womsis_creds(userid)
-        if not creds:
-            return jsonify({'success': False, 'error': 'Womsis bilgisi tanimli degil.'})
+# ────────────────────────────────────────────────────────────────────────────
+# KULLANICI YÖNETİMİ
+# ────────────────────────────────────────────────────────────────────────────
 
-        import requests as req
-        url  = creds['url'].rstrip('/') + '/authenticate'
-        resp = req.post(
-            url,
-            json={'app_key': creds['appkey'], 'app_secret': creds['seckey']},
-            timeout=15
-        )
-        token = resp.json().get('token')
-        if token:
-            return jsonify({'success': True, 'message': 'Womsis baglantisi basarili.'})
-        return jsonify({'success': False, 'error': 'Token alinamadi.'})
-
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+@app.route("/users")
+@login_required
+def users():
+    search = request.args.get("search", "").strip()
+    user_list = get_all_users(search)
+    return render_template("users.html", users=user_list, search=search)
 
 
-@app.route('/api/womsis/status', methods=['GET'])
-@require_api_key
-def api_womsis_status():
-    return jsonify({
-        'success':   True,
-        'status':    'ok',
-        'timestamp': datetime.now().isoformat(),
-        'server':    f'{HOST}:{PORT}'
-    })
+@app.route("/users/<int:user_id>", methods=["GET", "POST"])
+@login_required
+def user_edit(user_id):
+    user = get_user_by_id(user_id)
+    if not user:
+        flash("Kullanıcı bulunamadı.", "danger")
+        return redirect(url_for("users"))
 
+    if request.method == "POST":
+        action = request.form.get("action")
 
-@app.route('/api/womsis/accounts', methods=['GET'])
-@require_api_key
-def api_womsis_accounts():
-    try:
-        userid = int(request.args.get('userid', 1))
-        creds  = _get_womsis_creds(userid)
-        if not creds:
-            return jsonify({'success': False, 'error': 'Womsis bilgisi tanimli degil.'})
-
-        import requests as req
-        auth_url = creds['url'].rstrip('/') + '/authenticate'
-        resp  = req.post(auth_url, json={'app_key': creds['appkey'], 'app_secret': creds['seckey']}, timeout=15)
-        token = resp.json().get('token')
-        if not token:
-            return jsonify({'success': False, 'error': 'Token alinamadi.'})
-
-        acc_url  = creds['url'].rstrip('/') + '/accounts'
-        aresp    = req.get(acc_url, headers={'Authorization': f'Bearer {token}'}, timeout=20)
-        accounts = aresp.json().get('accounts', [])
-        return jsonify({'success': True, 'accounts': accounts})
-
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-# ── Yardimci Fonksiyonlar ─────────────────────────────────────────────────────
-def _authenticate(username: str, password: str):
-    """uyelik tablosundan kullanici dogrula — duz metin / MD5 / bcrypt."""
-    try:
-        conn = get_db()
-        cur  = conn.cursor()
-        cur.execute(
-            """SELECT id, kullanici_adi, sifre, musterino
-               FROM uyelik
-               WHERE kullanici_adi = %s OR eposta = %s
-               LIMIT 1""",
-            (username, username)
-        )
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-
-        if not row:
-            return None
-
-        uid, uname, stored, musterino = row
-        stored = stored or ''
-
-        # 1. Duz metin
-        if stored == password:
-            return {'id': uid, 'kullanici_adi': uname, 'musterino': musterino or 1}
-
-        # 2. MD5
-        if stored == hashlib.md5(password.encode()).hexdigest():
-            return {'id': uid, 'kullanici_adi': uname, 'musterino': musterino or 1}
-
-        # 3. Bcrypt ($2y$ PHP uyumu)
-        try:
-            import bcrypt
-            check = stored.replace('$2y$', '$2b$', 1).encode()
-            if bcrypt.checkpw(password.encode(), check):
-                return {'id': uid, 'kullanici_adi': uname, 'musterino': musterino or 1}
-        except Exception:
-            pass
-
-        return None
-
-    except Exception as e:
-        logger.error('Kimlik dogrulama DB hatasi: %s', e)
-        return None
-
-
-def _get_womsis_creds(userid: int):
-    """vomsisbilgileri tablosundan Womsis bilgilerini getir."""
-    try:
-        conn = get_db()
-        cur  = conn.cursor()
-        cur.execute(
-            "SELECT appkey, seckey, url FROM vomsisbilgileri WHERE userid = %s LIMIT 1",
-            (userid,)
-        )
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        if row:
-            return {
-                'appkey': row[0] or '',
-                'seckey': row[1] or '',
-                'url':    row[2] or 'https://developers.vomsis.com/api/v2'
+        if action == "update_info":
+            data = {
+                "kullanici_adi": request.form.get("kullanici_adi", "").strip(),
+                "eposta":        request.form.get("eposta", "").strip(),
+                "firmaadi":      request.form.get("firmaadi", "").strip(),
+                "vergino":       request.form.get("vergino", "").strip(),
+                "il":            request.form.get("il", "").strip(),
+                "ilce":          request.form.get("ilce", "").strip(),
             }
-        return None
-    except Exception as e:
-        logger.error('Womsis creds DB hatasi: %s', e)
-        return None
+            result = update_user_full(user_id, data)
+            flash(result["message"], "success" if result["success"] else "danger")
+
+        elif action == "update_yetki":
+            yetki = request.form.get("yetki", "0")
+            result = update_user_yetki(user_id, yetki)
+            flash(result["message"], "success" if result["success"] else "danger")
+
+        elif action == "update_lisans":
+            paket_turu = request.form.get("paket_turu", "")
+            son_odeme  = request.form.get("son_odeme", "")
+            result = update_user_lisans(user_id, paket_turu, son_odeme)
+            flash(result["message"], "success" if result["success"] else "danger")
+
+        elif action == "reset_password":
+            new_pass = request.form.get("new_password", "").strip()
+            result   = reset_user_password(user_id, new_pass)
+            flash(result["message"], "success" if result["success"] else "danger")
+
+        return redirect(url_for("user_edit", user_id=user_id))
+
+    user = get_user_by_id(user_id)
+    return render_template("user_edit.html", user=user)
 
 
-def _fetch_womsis_transactions(api_url, app_key, app_secret, start_dt, end_dt):
-    """Womsis API'den 7 gunluk parcalar halinde tum islemleri cek."""
-    import requests as req
-    from urllib.parse import urlencode
+# ────────────────────────────────────────────────────────────────────────────
+# WOMSIS PANELİ
+# ────────────────────────────────────────────────────────────────────────────
 
-    # Token al
-    auth_url = api_url.rstrip('/') + '/authenticate'
-    resp  = req.post(auth_url, json={'app_key': app_key, 'app_secret': app_secret}, timeout=15)
-    token = resp.json().get('token')
-    if not token:
-        raise ValueError('Womsis token alinamadi: ' + str(resp.json()))
+@app.route("/womsis", methods=["GET", "POST"])
+@login_required
+def womsis():
+    userid = session["user_id"]
+    bilgi  = get_vomsis_bilgileri(userid)
+    result = None
 
-    headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/json'}
-    results = []
-    current = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    if request.method == "POST":
+        action = request.form.get("action")
 
-    while current < end_dt:
-        chunk_end = min(current + timedelta(days=6), end_dt).replace(hour=23, minute=59, second=59)
-        params    = urlencode({
-            'beginDate': current.strftime('%d-%m-%Y %H:%M:%S'),
-            'endDate':   chunk_end.strftime('%d-%m-%Y %H:%M:%S')
-        })
-        tx_url = f"{api_url.rstrip('/')}/transactions?{params}"
-        try:
-            r = req.get(tx_url, headers=headers, timeout=30)
-            results.extend(r.json().get('transactions', []))
-        except Exception as ce:
-            logger.warning('Chunk [%s] hatasi: %s', current.date(), ce)
-        current = (current + timedelta(days=7)).replace(hour=0, minute=0, second=0)
+        if action == "save_settings":
+            appkey = request.form.get("appkey", "").strip()
+            seckey = request.form.get("seckey", "").strip()
+            url    = request.form.get("url", DEFAULT_API_URL).strip()
+            res    = save_vomsis_bilgileri(userid, appkey, seckey, url)
+            flash(res["message"], "success" if res["success"] else "danger")
+            bilgi  = get_vomsis_bilgileri(userid)
 
-    return results
+        elif action == "test_connection":
+            appkey = request.form.get("appkey", "").strip() or bilgi.get("appkey", "")
+            seckey = request.form.get("seckey", "").strip() or bilgi.get("seckey", "")
+            url    = request.form.get("url", DEFAULT_API_URL).strip() or bilgi.get("url", DEFAULT_API_URL)
+            result = vomsis_test_connection(url, appkey, seckey)
 
+        elif action == "fetch_data":
+            # "Verileri Çek" butonu
+            appkey = bilgi.get("appkey", "")
+            seckey = bilgi.get("seckey", "")
+            url    = bilgi.get("url", DEFAULT_API_URL)
 
-def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) -> tuple[int, int]:
-    """
-    Womsis API'den gelen işlemleri womsis_banka tablosuna kaydeder.
-    Aynı womsiskey varsa atlar (mükerrer kayıt önleme).
-    Returns: (kaydedilen, atlanan)
-    """
-    if not transactions:
-        return 0, 0
+            start_str = request.form.get("start_date", "")
+            end_str   = request.form.get("end_date", "")
 
-    saved   = 0
-    skipped = 0
-    now     = datetime.now()
+            try:
+                end_dt   = datetime.strptime(end_str, "%Y-%m-%d") if end_str else datetime.now()
+                start_dt = datetime.strptime(start_str, "%Y-%m-%d") if start_str else end_dt - timedelta(days=30)
+            except ValueError:
+                flash("Tarih formatı hatalı (YYYY-MM-DD).", "danger")
+                return redirect(url_for("womsis"))
 
-    try:
-        conn = get_db()
-        cur  = conn.cursor()
+            if not appkey or not seckey:
+                flash("Önce Womsis API bilgilerini kaydedin.", "warning")
+                return redirect(url_for("womsis"))
 
-        for tx in transactions:
-            # womsiskey: tekil anahtar — account_id + transaction_id kombinasyonu
-            account_id = str(tx.get('accountId') or tx.get('account_id') or '')
-            tx_id      = str(tx.get('id') or tx.get('transactionId') or '')
-            womsiskey  = f"{account_id}_{tx_id}" if account_id and tx_id else ''
-
-            # Tarih — Womsis genellikle 'YYYY-MM-DD' veya 'DD-MM-YYYY HH:MM:SS' döner
-            raw_tarih = str(tx.get('date') or tx.get('transactionDate') or tx.get('valueDate') or '')
-            tarih_iso = None
-            for fmt in ('%Y-%m-%d', '%d-%m-%Y %H:%M:%S', '%d-%m-%Y', '%Y-%m-%dT%H:%M:%S'):
-                try:
-                    tarih_iso = datetime.strptime(raw_tarih[:len(fmt)], fmt).strftime('%Y-%m-%d')
-                    break
-                except Exception:
-                    continue
-            if not tarih_iso:
-                tarih_iso = now.strftime('%Y-%m-%d')
-
-            # Tutar ve yön
-            tutar_raw    = tx.get('amount') or tx.get('tutar') or 0
-            tutar        = abs(float(tutar_raw))
-            debit        = float(tx.get('debit')  or 0)
-            credit       = float(tx.get('credit') or 0)
-            if credit > 0 and debit == 0:
-                gelirgider = 'gelir'
-            elif debit > 0 and credit == 0:
-                gelirgider = 'gider'
+            token, err = vomsis_authenticate(url, appkey, seckey)
+            if not token:
+                flash(f"Token alınamadı: {err}", "danger")
             else:
-                gelirgider = 'gelir' if float(tutar_raw) >= 0 else 'gider'
+                transactions = vomsis_get_all_transactions_chunked(url, token, start_dt, end_dt)
+                result = {
+                    "success": True,
+                    "transactions": transactions,
+                    "count": len(transactions),
+                    "period": {
+                        "start": start_dt.strftime("%Y-%m-%d"),
+                        "end":   end_dt.strftime("%Y-%m-%d"),
+                    }
+                }
+                flash(f"{len(transactions)} işlem başarıyla çekildi.", "success")
 
-            aciklama  = str(tx.get('description') or tx.get('aciklama') or '')[:255]
-            sube      = str(tx.get('accountName') or tx.get('bankName') or tx.get('sube') or '')
-            iban      = str(tx.get('iban') or '')
-            bakiye    = float(tx.get('balance') or tx.get('bakiye') or 0)
-            hesap_turu= str(tx.get('currency') or tx.get('hesap_turu') or 'TL')
-            dekont_no = str(tx.get('referenceNo') or tx.get('dekont_no') or '')
+    return render_template("womsis.html",
+                           bilgi=bilgi,
+                           result=result,
+                           default_url=DEFAULT_API_URL,
+                           today=datetime.now().strftime("%Y-%m-%d"),
+                           month_ago=(datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"))
 
-            # Mükerrer kontrol
-            if womsiskey:
-                cur.execute(
-                    'SELECT id FROM womsis_banka WHERE womsiskey = %s AND userid = %s LIMIT 1',
-                    (womsiskey, userid)
+
+# ────────────────────────────────────────────────────────────────────────────
+# AJAX / JSON endpoint'ler (UI)
+# ────────────────────────────────────────────────────────────────────────────
+
+@app.route("/ajax/db-test")
+@login_required
+def ajax_db_test():
+    return jsonify(test_connection())
+
+
+@app.route("/ajax/womsis-test", methods=["POST"])
+@login_required
+def ajax_womsis_test():
+    body   = request.get_json(silent=True) or {}
+    userid = session["user_id"]
+    bilgi  = get_vomsis_bilgileri(userid)
+    appkey = body.get("appkey") or bilgi.get("appkey", "")
+    seckey = body.get("seckey") or bilgi.get("seckey", "")
+    url    = body.get("url")    or bilgi.get("url", DEFAULT_API_URL)
+    return jsonify(vomsis_test_connection(url, appkey, seckey))
+
+
+# ── API Key bilgisi ───────────────────────────────────────────────────────────
+@app.route("/settings")
+@login_required
+def settings():
+    if session.get("yetki") != "superadmin":
+        flash("Bu sayfaya erişim yetkiniz yok.", "danger")
+        return redirect(url_for("dashboard"))
+    return render_template("settings.html",
+                           api_key=WEBADMIN_API_KEY,
+                           db_status=test_connection())
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# ZAMANLAYICI YÖNETİMİ  (Otomatik Womsis Sync)
+# ────────────────────────────────────────────────────────────────────────────
+
+@app.route("/scheduler", methods=["GET", "POST"])
+@login_required
+def scheduler():
+    """Otomatik Womsis sync zamanlayıcısını yönetir."""
+    if request.method == "POST":
+        action = request.form.get("action")
+
+        if action == "set_schedule":
+            try:
+                hour   = int(request.form.get("hour",   0))
+                minute = int(request.form.get("minute", 0))
+                hour   = max(0, min(23, hour))
+                minute = max(0, min(59, minute))
+                stop_scheduler()                        # Önce durdur
+                import time; time.sleep(0.2)            # Thread'in durmasını bekle
+                start_scheduler(hour=hour, minute=minute)  # Yeni saatle başlat
+                flash(
+                    f"✅  Zamanlayıcı ayarlandı: her gün {hour:02d}:{minute:02d}'de çalışacak.",
+                    "success"
                 )
-                if cur.fetchone():
-                    skipped += 1
-                    continue
+            except (ValueError, TypeError):
+                flash("Geçersiz saat/dakika değeri.", "danger")
 
-            cur.execute("""
-                INSERT INTO womsis_banka
-                    (userid, musterino, tarih, aciklama, gelirgider, tutar,
-                     sube, faturaunvan, womsiskey, kaynak,
-                     created_at, bakiye, iban, hesap_turu, dekont_no)
-                VALUES
-                    (%s, %s, %s, %s, %s, %s,
-                     %s, %s, %s, %s,
-                     %s, %s, %s, %s, %s)
-            """, (
-                userid, musterino, tarih_iso, aciklama, gelirgider, tutar,
-                sube, '-', womsiskey, 'womsis_scheduler',
-                now, bakiye, iban, hesap_turu, dekont_no
-            ))
-            saved += 1
+        elif action == "run_now":
+            import threading
+            t = threading.Thread(target=run_womsis_sync_job, daemon=True)
+            t.start()
+            flash("⚡  Womsis sync başlatıldı — arka planda çalışıyor.", "success")
 
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        logger.error('womsis DB kayit hatasi: %s', e, exc_info=True)
-        try:
-            conn.rollback()
-            conn.close()
-        except Exception:
-            pass
+        return redirect(url_for("scheduler"))
 
-    return saved, skipped
+    state = get_scheduler_state()
+    logs  = get_sync_logs(limit=50)
+    return render_template("scheduler.html", state=state, logs=logs)
 
 
-# ── Hata Yoneticileri ─────────────────────────────────────────────────────────
-@app.errorhandler(500)
-def handle_500(e):
-    logger.error('500 hatasi: %s', e, exc_info=True)
-    if request.path.startswith('/api/'):
-        return jsonify({'success': False, 'error': 'Sunucu hatasi: ' + str(e)}), 500
-    return f'<h2>Sunucu Hatasi</h2><pre>{e}</pre>', 500
+# ── Context processor ─────────────────────────────────────────────────────────
+@app.context_processor
+def inject_globals():
+    return {
+        "current_user": {
+            "id":       session.get("user_id"),
+            "username": session.get("username"),
+            "yetki":    session.get("yetki"),
+            "firmaadi": session.get("firmaadi"),
+        },
+        "now": datetime.now(),
+    }
 
 
+# ── Hata sayfaları ────────────────────────────────────────────────────────────
 @app.errorhandler(404)
-def handle_404(e):
-    if request.path.startswith('/api/'):
-        return jsonify({'success': False, 'error': 'Endpoint bulunamadi.'}), 404
-    return redirect(url_for('login'))
+def page_not_found(e):
+    return render_template("base.html"), 404
 
 
-# ── Baslat ────────────────────────────────────────────────────────────────────
-if __name__ == '__main__':
-    logger.info('=' * 50)
-    logger.info('webadmin-nakitakim basliyor')
-    logger.info('Adres  : http://%s:%s', HOST, PORT)
-    logger.info('DB     : %s@%s:%s/%s (ssl=%s)', PG_USER, PG_HOST, PG_PORT, PG_DB, PG_SSLMODE)
-    logger.info('Debug  : %s', DEBUG)
-    logger.info('=' * 50)
-    app.run(host=HOST, port=PORT, debug=DEBUG)
+# ── Başlat ────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    from pathlib import Path
+
+    cert_file = Path(__file__).parent / "cert.pem"
+    key_file  = Path(__file__).parent / "key.pem"
+
+    ssl_context = None
+    if cert_file.exists() and key_file.exists():
+        ssl_context = (str(cert_file), str(key_file))
+        proto = "https"
+        logger.info(f"🔒  SSL modu aktif — cert: {cert_file.name}, key: {key_file.name}")
+    else:
+        proto = "http"
+        logger.info("ℹ️   SSL sertifikası bulunamadı — HTTP modunda başlatılıyor.")
+        logger.info("    HTTPS için nakitAkim → Eklentiler → webadmin Ayarları → Sertifika Oluştur")
+
+    # ── Otomatik Womsis Zamanlayıcısı — gece 00:00'da başlar ─────────────────
+    # Saati değiştirmek için webadmin → Zamanlayıcı sayfasını kullanın.
+    # Veya burada start_scheduler(hour=X, minute=Y) ile override edebilirsiniz.
+    start_scheduler(hour=0, minute=0)
+
+    logger.info(f"webadmin-nakitAkim başlatılıyor → {proto}://{HOST}:{PORT}")
+    app.run(
+        host=HOST,
+        port=PORT,
+        debug=DEBUG,
+        ssl_context=ssl_context,
+    )
