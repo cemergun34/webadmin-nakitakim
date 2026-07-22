@@ -128,14 +128,108 @@ def _sync_user(userid: int, start_dt: datetime, end_dt: datetime) -> dict:
 
     try:
         txs = vomsis_get_all_transactions_chunked(api_url, token, start_dt, end_dt)
+        
+        # ── DB'ye kaydet (womsis_banka) ──────────────────────────────────────
+        # Her zaman userid=1 ve musterino=1 olarak kaydediyoruz.
+        saved, skipped = _save_womsis_to_db(txs, userid=1, musterino=1)
+        
         return {
             "success": True,
             "count":   len(txs),
-            "message": f"{len(txs)} işlem çekildi.",
+            "message": f"{len(txs)} işlem çekildi. ({saved} yeni eklendi, {skipped} atlandı)",
             "data":    txs,
         }
     except Exception as e:
         return {"success": False, "count": 0, "message": str(e)}
+
+def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) -> tuple[int, int]:
+    """
+    Womsis API'den gelen işlemleri womsis_banka tablosuna kaydeder.
+    Aynı womsiskey varsa atlar (mükerrer kayıt önleme).
+    """
+    if not transactions:
+        return 0, 0
+
+    saved   = 0
+    skipped = 0
+    now     = datetime.now()
+
+    try:
+        from db.connection import get_connection
+        conn = get_connection()
+        cur  = conn.cursor()
+
+        for tx in transactions:
+            account_id = str(tx.get('accountId') or tx.get('account_id') or '')
+            tx_id      = str(tx.get('id') or tx.get('transactionId') or '')
+            womsiskey  = f"{account_id}_{tx_id}" if account_id and tx_id else ''
+
+            raw_tarih = str(tx.get('date') or tx.get('transactionDate') or tx.get('valueDate') or '')
+            tarih_iso = None
+            for fmt in ('%Y-%m-%d', '%d-%m-%Y %H:%M:%S', '%d-%m-%Y', '%Y-%m-%dT%H:%M:%S'):
+                try:
+                    tarih_iso = datetime.strptime(raw_tarih[:len(fmt)], fmt).strftime('%Y-%m-%d')
+                    break
+                except Exception:
+                    continue
+            if not tarih_iso:
+                tarih_iso = now.strftime('%Y-%m-%d')
+
+            tutar_raw    = tx.get('amount') or tx.get('tutar') or 0
+            tutar        = abs(float(tutar_raw))
+            debit        = float(tx.get('debit')  or 0)
+            credit       = float(tx.get('credit') or 0)
+            if credit > 0 and debit == 0:
+                gelirgider = 'gelir'
+            elif debit > 0 and credit == 0:
+                gelirgider = 'gider'
+            else:
+                gelirgider = 'gelir' if float(tutar_raw) >= 0 else 'gider'
+
+            aciklama  = str(tx.get('description') or tx.get('aciklama') or '')[:255]
+            sube      = str(tx.get('accountName') or tx.get('bankName') or tx.get('sube') or '')
+            iban      = str(tx.get('iban') or '')
+            bakiye    = float(tx.get('balance') or tx.get('bakiye') or 0)
+            hesap_turu= str(tx.get('currency') or tx.get('hesap_turu') or 'TL')
+            dekont_no = str(tx.get('referenceNo') or tx.get('dekont_no') or '')
+
+            if womsiskey:
+                cur.execute(
+                    'SELECT id FROM womsis_banka WHERE womsiskey = %s AND userid = %s LIMIT 1',
+                    (womsiskey, userid)
+                )
+                if cur.fetchone():
+                    skipped += 1
+                    continue
+
+            cur.execute("""
+                INSERT INTO womsis_banka
+                    (userid, musterino, tarih, aciklama, gelirgider, tutar,
+                     sube, faturaunvan, womsiskey, kaynak,
+                     created_at, bakiye, iban, hesap_turu, dekont_no)
+                VALUES
+                    (%s, %s, %s, %s, %s, %s,
+                     %s, %s, %s, %s,
+                     %s, %s, %s, %s, %s)
+            """, (
+                userid, musterino, tarih_iso, aciklama, gelirgider, tutar,
+                sube, '-', womsiskey, 'womsis_scheduler',
+                now, bakiye, iban, hesap_turu, dekont_no
+            ))
+            saved += 1
+
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error('womsis DB kayit hatasi: %s', e, exc_info=True)
+        try:
+            conn.rollback()
+            conn.close()
+        except Exception:
+            pass
+
+    return saved, skipped
 
 
 def _get_all_userids() -> list[int]:
