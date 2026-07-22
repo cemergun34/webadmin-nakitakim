@@ -250,7 +250,7 @@ def womsis():
                     b_str = start_dt.strftime("%d-%m-%Y %H:%M:%S")
                     e_str = end_dt.strftime("%d-%m-%Y %H:%M:%S")
                     for term in terminals:
-                        t_id = term.get("terminalId") or term.get("id")
+                        t_id = term.get("stationId") or term.get("id") or term.get("terminalId")
                         if t_id:
                             term_txs = vomsis_get_terminal_transactions(url, token, t_id, b_str, e_str)
                             if term_txs:

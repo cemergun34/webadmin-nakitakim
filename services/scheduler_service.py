@@ -144,7 +144,7 @@ def _sync_user(userid: int, start_dt: datetime, end_dt: datetime) -> dict:
             b_str = start_dt.strftime("%d-%m-%Y %H:%M:%S")
             e_str = end_dt.strftime("%d-%m-%Y %H:%M:%S")
             for term in terminals:
-                t_id = term.get("terminalId") or term.get("id")
+                t_id = term.get("stationId") or term.get("id") or term.get("terminalId")
                 if t_id:
                     term_txs = vomsis_get_terminal_transactions(api_url, token, t_id, b_str, e_str)
                     if term_txs:
@@ -292,16 +292,16 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
                         pass
                         
             # Rakamlar
-            islemtutari = float(tx.get('transactionAmount') or tx.get('amount') or tx.get('islemtutari') or 0)
-            isyeriucreti = float(tx.get('merchantCommissionAmount') or tx.get('commission') or tx.get('isyeriucretitutar') or 0)
-            nettutar = float(tx.get('netAmount') or tx.get('net') or tx.get('nettutar') or 0)
+            islemtutari = float(str(tx.get('amount') or tx.get('transactionAmount') or tx.get('islemtutari') or 0).replace(",", "."))
+            isyeriucreti = float(str(tx.get('commissionAmount') or tx.get('commission') or tx.get('merchantCommissionAmount') or tx.get('isyeriucretitutar') or 0).replace(",", "."))
+            nettutar = float(str(tx.get('netAmount') or tx.get('net') or tx.get('nettutar') or 0).replace(",", "."))
             
             # Kart ve POS bilgileri
             posno = str(tx.get('terminalNo') or tx.get('posNo') or posno_fallback or '')
-            brand = str(tx.get('cardBrand') or tx.get('brand') or '')
-            kartno = str(tx.get('maskedCardNumber') or tx.get('cardNumber') or tx.get('kartno') or '')
-            islemtipi = str(tx.get('transactionType') or tx.get('type') or '')
-            isyerino = str(tx.get('merchantNo') or tx.get('isyerino') or '')
+            brand = str(tx.get('brand') or tx.get('cardBrand') or '')
+            kartno = str(tx.get('maskedCardNumber') or tx.get('cardNo') or tx.get('kartno') or '')
+            islemtipi = str(tx.get('type') or tx.get('transactionType') or '')
+            isyerino = str(tx.get('merchantId') or tx.get('merchantNo') or tx.get('isyerino') or '')
             aciklama = str(tx.get('description') or tx.get('aciklama') or '')[:255]
 
             # Mükerrer kontrolü
