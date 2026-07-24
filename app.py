@@ -32,6 +32,7 @@ from services.vomsis_service import (
 )
 from api.womsis_api import womsis_bp
 from api.sirket_config import sirket_config_bp
+from api.fatura_api import fatura_bp
 from services.scheduler_service import (
     start_scheduler, stop_scheduler, run_womsis_sync_job,
     get_scheduler_state, get_sync_logs,
@@ -53,6 +54,7 @@ app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
 # Blueprint kayıt
 app.register_blueprint(womsis_bp)
 app.register_blueprint(sirket_config_bp)
+app.register_blueprint(fatura_bp)
 
 
 # ── Auth dekoratörü ───────────────────────────────────────────────────────────
