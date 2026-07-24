@@ -214,3 +214,68 @@ def get_accounts():
         bilgi.get("url", "https://developers.vomsis.com/api/v2"), token
     )
     return jsonify({"success": True, "accounts": accounts, "count": len(accounts)})
+
+
+# ── Fatura XML ────────────────────────────────────────────────────────────────
+
+import os
+import re
+from flask import send_from_directory
+from werkzeug.utils import secure_filename
+
+
+def _get_xml_dir(sirket: str = "") -> str:
+    basedir = os.path.dirname(os.path.dirname(__file__))
+    base = os.path.join(basedir, "data", "fatura_xmls")
+    if sirket:
+        clean = re.sub(r'[^\w\-]', '_', sirket.strip())
+        target = os.path.join(base, clean)
+    else:
+        target = base
+    os.makedirs(target, exist_ok=True)
+    return target
+
+
+@womsis_bp.route("/fatura/upload_xml", methods=["POST"])
+@require_api_key
+def fatura_upload_xml():
+    if 'file' not in request.files:
+        return jsonify({"success": False, "error": "Dosya bulunamadı."}), 400
+    file = request.files['file']
+    if not file.filename or not file.filename.endswith('.xml'):
+        return jsonify({"success": False, "error": "Geçersiz dosya formatı."}), 400
+    sirket = request.form.get("sirket", "")
+    target_dir = _get_xml_dir(sirket)
+    filename = secure_filename(file.filename)
+    file.save(os.path.join(target_dir, filename))
+    return jsonify({"success": True, "filename": filename, "sirket": sirket})
+
+
+@womsis_bp.route("/fatura/get_xml/<sirket>/<filename>", methods=["GET"])
+@require_api_key
+def fatura_get_xml_sirket(sirket, filename):
+    basedir = os.path.dirname(os.path.dirname(__file__))
+    base = os.path.join(basedir, "data", "fatura_xmls")
+    safe_s = re.sub(r'[^\w\-]', '_', sirket.strip())
+    safe_f = secure_filename(filename)
+    target = os.path.join(base, safe_s)
+    if os.path.exists(os.path.join(target, safe_f)):
+        return send_from_directory(target, safe_f)
+    return jsonify({"success": False, "error": "Dosya bulunamadı."}), 404
+
+
+@womsis_bp.route("/fatura/get_xml/<filename>", methods=["GET"])
+@require_api_key
+def fatura_get_xml(filename):
+    basedir = os.path.dirname(os.path.dirname(__file__))
+    base = os.path.join(basedir, "data", "fatura_xmls")
+    safe_f = secure_filename(filename)
+    if os.path.exists(os.path.join(base, safe_f)):
+        return send_from_directory(base, safe_f)
+    for entry in os.scandir(base) if os.path.exists(base) else []:
+        if entry.is_dir():
+            candidate = os.path.join(entry.path, safe_f)
+            if os.path.exists(candidate):
+                return send_from_directory(entry.path, safe_f)
+    return jsonify({"success": False, "error": "Dosya bulunamadı."}), 404
+
