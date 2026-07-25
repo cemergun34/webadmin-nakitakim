@@ -142,12 +142,36 @@ def create_sirket(data: dict) -> dict:
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """, (0, musterino, data.get("unvan", ""), webadmin_url, api_key,
               aktif, now_str, now_str))
+
+        # ── Nakitakim servis tablolarına boş başlangıç satırları ────────────
+        # vomsisbilgileri: Womsis API bağlantısı — boş başlangıç
+        cur.execute("""
+            INSERT INTO vomsisbilgileri (userid, musterino, appkey, seckey, url, kayit_tarihi, guncelleme_tarihi)
+            SELECT 0, %s, '', '', 'https://developers.vomsis.com/api/v2', %s, %s
+            WHERE NOT EXISTS (SELECT 1 FROM vomsisbilgileri WHERE musterino=%s)
+        """, (musterino, now_str, now_str, musterino))
+
+        # apisanalpos: PayTR API bağlantısı — boş başlangıç
+        cur.execute("""
+            INSERT INTO apisanalpos (userid, musterino, firma_adi, magaza_no, magaza_parola, magaza_gizli_anahtar, kayit_tarihi)
+            SELECT 0, %s, %s, '', '', '', %s
+            WHERE NOT EXISTS (SELECT 1 FROM apisanalpos WHERE musterino=%s)
+        """, (musterino, data.get("unvan", ""), now_str, musterino))
+
+        # moy_bilgileri: MOY muhasebe bağlantısı — boş başlangıç
+        cur.execute("""
+            INSERT INTO moy_bilgileri (musterino, url, username, sifre, moykayitno, tarih)
+            SELECT %s, '', '', '', 0, %s
+            WHERE NOT EXISTS (SELECT 1 FROM moy_bilgileri WHERE musterino=%s)
+        """, (musterino, now_str, musterino))
+
         conn.commit()
         cur.close(); conn.close()
         return {"success": True, "musterino": musterino}
     except Exception as e:
         logger.error("create_sirket hata: %s", e)
         return {"success": False, "error": str(e)}
+
 
 
 def update_sirket(musterino: int, data: dict) -> dict:
