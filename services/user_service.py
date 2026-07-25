@@ -176,18 +176,44 @@ def get_stats() -> dict:
 
 
 def verify_admin_login(username: str, password: str) -> Optional[dict]:
-    """webadmin girişi için admin/superadmin doğrulaması."""
+    """webadmin girişi için admin/superadmin doğrulaması.
+    Şifre: düz metin, MD5 veya bcrypt ($2b$/$2y$) desteklenir.
+    """
     conn = get_connection()
     try:
         row = conn.execute(
-            """SELECT id, kullanici_adi, yetki, firmaadi
+            """SELECT id, kullanici_adi, sifre, yetki, firmaadi
                FROM uyelik
-               WHERE kullanici_adi=%s AND sifre=%s
+               WHERE kullanici_adi=%s
                AND yetki IN ('admin','superadmin')
                LIMIT 1""",
-            (username, password)
+            (username,)
         ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+
+        row_dict = dict(row)
+        stored   = row_dict.get("sifre", "") or ""
+
+        # 1. Düz metin
+        if stored == password:
+            return {k: v for k, v in row_dict.items() if k != "sifre"}
+
+        # 2. MD5
+        import hashlib
+        if stored == hashlib.md5(password.encode()).hexdigest():
+            return {k: v for k, v in row_dict.items() if k != "sifre"}
+
+        # 3. bcrypt ($2b$ veya PHP $2y$ → $2b$)
+        try:
+            import bcrypt
+            check_hash = stored.replace("$2y$", "$2b$", 1).encode()
+            if bcrypt.checkpw(password.encode(), check_hash):
+                return {k: v for k, v in row_dict.items() if k != "sifre"}
+        except Exception:
+            pass
+
+        return None
     except Exception as e:
         logger.error("Login hatası: %s", e)
         return None
