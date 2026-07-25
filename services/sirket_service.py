@@ -10,7 +10,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def _pg_pg_conn():
+def _pg_conn():
     from db.db_config import get_pg_params
     import psycopg2
     import psycopg2.extras
