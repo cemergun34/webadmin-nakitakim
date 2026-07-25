@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Şirketler | NakitAkım WebAdmin{% endblock %}
+{% block page_title %}Şirket Yönetimi{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">
+      <svg viewBox="0 0 24 24" fill="none"><rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 21h8M12 17v4" stroke="currentColor" stroke-width="2"/></svg>
+      Şirketler ({{ sirketler|length }})
+    </h3>
+    <div style="display:flex;gap:8px;align-items:center">
+      <form method="GET" class="search-form" id="searchForm">
+        <div class="input-wrapper compact">
+          <svg class="input-icon" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/><line x1="21" y1="21" x2="16.65" y2="16.65" stroke="currentColor" stroke-width="2"/></svg>
+          <input type="text" name="search" placeholder="Şirket adı veya vergi no..." value="{{ search }}" id="searchInput" />
+        </div>
+        <button type="submit" class="btn btn-sm btn-primary">Ara</button>
+        {% if search %}<a href="{{ url_for('sirketler') }}" class="btn btn-sm btn-ghost">Temizle</a>{% endif %}
+      </form>
+      <a href="{{ url_for('sirket_yeni') }}" class="btn btn-sm btn-success" id="btnYeniSirket">
+        <svg viewBox="0 0 24 24" fill="none" style="width:14px;height:14px"><line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" stroke-width="2"/><line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2"/></svg>
+        Yeni Şirket
+      </a>
+    </div>
+  </div>
+
+  <div class="table-wrapper">
+    <table class="table table-hover" id="sirketlerTable">
+      <thead>
+        <tr>
+          <th>ID (musterino)</th>
+          <th>Unvan</th>
+          <th>Vergi No</th>
+          <th>İl / İlçe</th>
+          <th>WebAdmin</th>
+          <th>Kullanıcılar</th>
+          <th>İşlem</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in sirketler %}
+        <tr>
+          <td class="td-id"><span class="badge badge-user">{{ '%04d'|format(s.musterino) }}</span></td>
+          <td><strong>{{ s.unvan or '—' }}</strong></td>
+          <td>{{ s.vergino or '—' }}</td>
+          <td>{{ s.il or '—' }}{% if s.ilce %} / {{ s.ilce }}{% endif %}</td>
+          <td>
+            {% if s.aktif %}
+              <span class="badge badge-admin">Aktif</span>
+            {% else %}
+              <span class="badge badge-user">Pasif</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge badge-superadmin">{{ s.kullanici_sayisi }} kullanıcı</span>
+          </td>
+          <td style="display:flex;gap:6px">
+            <a href="{{ url_for('sirket_detay', musterino=s.musterino) }}" class="btn btn-xs btn-primary">Düzenle</a>
+            <form method="POST" action="{{ url_for('sirket_sil', musterino=s.musterino) }}"
+                  onsubmit="return confirm('{{ s.unvan }} silinsin mi? Tüm kullanıcılar da silinir!')">
+              <button type="submit" class="btn btn-xs btn-danger">Sil</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-muted">Şirket bulunamadı.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -24,6 +24,11 @@ from services.user_service import (
     update_user_lisans, reset_user_password, update_user_full,
     get_stats, verify_admin_login,
 )
+from services.sirket_service import (
+    get_all_sirketler, get_sirket, create_sirket, update_sirket, delete_sirket,
+    get_sirket_users, get_user, create_user, update_user, delete_user,
+)
+
 from services.vomsis_service import (
     get_vomsis_bilgileri, save_vomsis_bilgileri,
     vomsis_authenticate, vomsis_get_all_transactions_chunked,
@@ -180,6 +185,105 @@ def user_edit(user_id):
 
     user = get_user_by_id(user_id)
     return render_template("user_edit.html", user=user)
+
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# ŞİRKET YÖNETİMİ
+# ────────────────────────────────────────────────────────────────────────────
+
+@app.route("/sirketler")
+@login_required
+def sirketler():
+    search = request.args.get("search", "").strip()
+    liste  = get_all_sirketler(search)
+    return render_template("sirketler.html", sirketler=liste, search=search)
+
+
+@app.route("/sirketler/yeni", methods=["GET", "POST"])
+@login_required
+def sirket_yeni():
+    if request.method == "POST":
+        data   = request.form.to_dict()
+        result = create_sirket(data)
+        if result["success"]:
+            flash(f"✅ Şirket oluşturuldu (ID: {str(result['musterino']).zfill(4)}).", "success")
+            return redirect(url_for("sirket_detay", musterino=result["musterino"]))
+        flash(f"Hata: {result.get('error')}", "danger")
+    empty = {"unvan":"","vergino":"","tckn":"","vergidairesi":"",
+             "adres":"","il":"","ilce":"","webadmin_url":"","api_key":"",
+             "wc_aktif": False, "musterino": 0}
+    return render_template("sirket_detay.html", sirket=empty,
+                           kullanicilar=[], yeni=True)
+
+
+@app.route("/sirketler/<int:musterino>", methods=["GET", "POST"])
+@login_required
+def sirket_detay(musterino):
+    sirket = get_sirket(musterino)
+    if not sirket:
+        flash("Şirket bulunamadı.", "danger")
+        return redirect(url_for("sirketler"))
+    if request.method == "POST":
+        data   = request.form.to_dict()
+        result = update_sirket(musterino, data)
+        flash("✅ Şirket güncellendi." if result["success"] else f"Hata: {result.get('error')}",
+              "success" if result["success"] else "danger")
+        return redirect(url_for("sirket_detay", musterino=musterino))
+    kullanicilar = get_sirket_users(musterino)
+    return render_template("sirket_detay.html", sirket=sirket,
+                           kullanicilar=kullanicilar, yeni=False)
+
+
+@app.route("/sirketler/<int:musterino>/sil", methods=["POST"])
+@login_required
+def sirket_sil(musterino):
+    result = delete_sirket(musterino)
+    flash("✅ Şirket silindi." if result["success"] else f"Hata: {result.get('error')}",
+          "success" if result["success"] else "danger")
+    return redirect(url_for("sirketler"))
+
+
+# ── Kullanıcı ─────────────────────────────────────────────────────────────────
+
+@app.route("/sirketler/<int:musterino>/kullanici/yeni", methods=["GET", "POST"])
+@login_required
+def kullanici_yeni(musterino):
+    if request.method == "POST":
+        data   = request.form.to_dict()
+        result = create_user(musterino, data)
+        if result["success"]:
+            flash(f"✅ Kullanıcı oluşturuldu.", "success")
+            return redirect(url_for("sirket_detay", musterino=musterino))
+        flash(f"Hata: {result.get('error')}", "danger")
+    return render_template("kullanici_form.html", musterino=musterino,
+                           kullanici={}, yeni=True)
+
+
+@app.route("/sirketler/<int:musterino>/kullanici/<int:uid>", methods=["GET", "POST"])
+@login_required
+def kullanici_duzenle(musterino, uid):
+    kullanici = get_user(uid)
+    if not kullanici:
+        flash("Kullanıcı bulunamadı.", "danger")
+        return redirect(url_for("sirket_detay", musterino=musterino))
+    if request.method == "POST":
+        data   = request.form.to_dict()
+        result = update_user(uid, data)
+        flash("✅ Kullanıcı güncellendi." if result["success"] else f"Hata: {result.get('error')}",
+              "success" if result["success"] else "danger")
+        return redirect(url_for("sirket_detay", musterino=musterino))
+    return render_template("kullanici_form.html", musterino=musterino,
+                           kullanici=kullanici, yeni=False)
+
+
+@app.route("/sirketler/<int:musterino>/kullanici/<int:uid>/sil", methods=["POST"])
+@login_required
+def kullanici_sil(musterino, uid):
+    result = delete_user(uid)
+    flash("✅ Kullanıcı silindi." if result["success"] else f"Hata: {result.get('error')}",
+          "success" if result["success"] else "danger")
+    return redirect(url_for("sirket_detay", musterino=musterino))
 
 
 # ────────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Yeni Kullanıcı' if yeni else kullanici.kullanici_adi }} | NakitAkım WebAdmin{% endblock %}
+{% block page_title %}{{ 'Yeni Kullanıcı Ekle' if yeni else 'Kullanıcı Düzenle' }}{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="2"/></svg>
+      {{ 'Yeni Kullanıcı' if yeni else 'Kullanıcı Düzenle' }}
+      — Şirket <span class="badge badge-user">{{ '%04d'|format(musterino) }}</span>
+    </h3>
+    <a href="{{ url_for('sirket_detay', musterino=musterino) }}" class="btn btn-sm btn-ghost">← Geri</a>
+  </div>
+
+  <form method="POST" style="padding:24px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+      <div class="form-group">
+        <label>Ad <span style="color:#ef4444">*</span></label>
+        <input type="text" name="ad" class="form-control" required
+               value="{{ kullanici.ad if not yeni else '' }}" id="inputAd"/>
+      </div>
+
+      <div class="form-group">
+        <label>Soyad</label>
+        <input type="text" name="soyad" class="form-control"
+               value="{{ kullanici.soyad if not yeni else '' }}" id="inputSoyad"/>
+      </div>
+
+      <div class="form-group">
+        <label>Kullanıcı Adı <span style="color:#ef4444">*</span></label>
+        <input type="text" name="kullanici_adi" class="form-control" required
+               value="{{ kullanici.kullanici_adi if not yeni else '' }}" id="inputKullaniciAdi"/>
+      </div>
+
+      <div class="form-group">
+        <label>E-posta</label>
+        <input type="email" name="eposta" class="form-control"
+               value="{{ kullanici.eposta if not yeni else '' }}" id="inputEposta"/>
+      </div>
+
+      <div class="form-group">
+        <label>Şifre {% if not yeni %}<small class="text-muted">(boş bırakılırsa değişmez)</small>{% else %}<span style="color:#ef4444">*</span>{% endif %}</label>
+        <input type="password" name="sifre" class="form-control"
+               {% if yeni %}required{% endif %} id="inputSifre"
+               placeholder="{{ 'Yeni şifre girin' if not yeni else 'Şifre belirleyin' }}"/>
+      </div>
+
+      <div class="form-group">
+        <label>Yetki</label>
+        <select name="yetki" class="form-control" id="inputYetki">
+          {% for opt in ['user','admin','superadmin'] %}
+          <option value="{{ opt }}"
+            {% if not yeni and kullanici.yetki == opt %}selected
+            {% elif yeni and opt == 'user' %}selected{% endif %}>
+            {{ opt }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Paket Türü</label>
+        <input type="text" name="paket_turu" class="form-control"
+               value="{{ kullanici.paket_turu if not yeni else '' }}" id="inputPaketTuru"/>
+      </div>
+
+      <div class="form-group">
+        <label>Lisans Bitiş Tarihi</label>
+        <input type="date" name="son_odeme" class="form-control"
+               value="{{ kullanici.son_odeme if not yeni and kullanici.son_odeme else '' }}"
+               id="inputSonOdeme"/>
+      </div>
+
+      <div style="grid-column:1/-1;display:flex;gap:12px;padding-top:8px">
+        <button type="submit" class="btn btn-primary" id="btnKaydet">
+          {{ 'Kullanıcı Oluştur' if yeni else 'Kaydet' }}
+        </button>
+        <a href="{{ url_for('sirket_detay', musterino=musterino) }}" class="btn btn-ghost">İptal</a>
+      </div>
+    </div>
+  </form>
+</div>
+{% endblock %}

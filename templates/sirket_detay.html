@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Yeni Şirket' if yeni else sirket.unvan }} | NakitAkım WebAdmin{% endblock %}
+{% block page_title %}{{ 'Yeni Şirket Ekle' if yeni else 'Şirket Düzenle' }}{% endblock %}
+
+{% block content %}
+
+<!-- Şirket Bilgileri -->
+<div class="card" style="margin-bottom:24px">
+  <div class="card-header">
+    <h3 class="card-title">
+      <svg viewBox="0 0 24 24" fill="none"><rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 21h8M12 17v4" stroke="currentColor" stroke-width="2"/></svg>
+      Şirket Bilgileri{% if not yeni %} — <span class="badge badge-user">{{ '%04d'|format(sirket.musterino) }}</span>{% endif %}
+    </h3>
+    <a href="{{ url_for('sirketler') }}" class="btn btn-sm btn-ghost">← Geri</a>
+  </div>
+  <form method="POST" action="{{ url_for('sirket_detay', musterino=sirket.musterino) if not yeni else url_for('sirket_yeni') }}">
+    <input type="hidden" name="action" value="update_sirket">
+    <div class="form-grid" style="padding:24px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+      <div class="form-group" style="grid-column:1/-1">
+        <label>Ünvan <span style="color:#ef4444">*</span></label>
+        <input type="text" name="unvan" value="{{ sirket.unvan if not yeni else '' }}"
+               class="form-control" required placeholder="Şirket ünvanı" id="inputUnvan"/>
+      </div>
+
+      <div class="form-group">
+        <label>Vergi No</label>
+        <input type="text" name="vergino" value="{{ sirket.vergino if not yeni else '' }}"
+               class="form-control" placeholder="1234567890" id="inputVergino"/>
+      </div>
+
+      <div class="form-group">
+        <label>Vergi Dairesi</label>
+        <input type="text" name="vergidairesi" value="{{ sirket.vergidairesi if not yeni else '' }}"
+               class="form-control" id="inputVergidairesi"/>
+      </div>
+
+      <div class="form-group">
+        <label>TC Kimlik No</label>
+        <input type="text" name="tckn" value="{{ sirket.tckn if not yeni else '' }}"
+               class="form-control" id="inputTckn"/>
+      </div>
+
+      <div class="form-group">
+        <label>İl</label>
+        <input type="text" name="il" value="{{ sirket.il if not yeni else '' }}"
+               class="form-control" id="inputIl"/>
+      </div>
+
+      <div class="form-group">
+        <label>İlçe</label>
+        <input type="text" name="ilce" value="{{ sirket.ilce if not yeni else '' }}"
+               class="form-control" id="inputIlce"/>
+      </div>
+
+      <div class="form-group" style="grid-column:1/-1">
+        <label>Adres</label>
+        <textarea name="adres" class="form-control" rows="2" id="inputAdres">{{ sirket.adres if not yeni else '' }}</textarea>
+      </div>
+
+      <div class="section-divider" style="grid-column:1/-1;border-top:1px solid #e5e7eb;padding-top:16px">
+        <strong>WebAdmin Bağlantı Ayarları</strong>
+      </div>
+
+      <div class="form-group" style="grid-column:1/-1">
+        <label>WebAdmin URL</label>
+        <input type="text" name="webadmin_url"
+               value="{{ sirket.webadmin_url if not yeni else 'http://178.233.204.224:5050' }}"
+               class="form-control" placeholder="http://..." id="inputWebadminUrl"/>
+      </div>
+
+      <div class="form-group">
+        <label>API Key</label>
+        <input type="text" name="api_key"
+               value="{{ sirket.api_key if not yeni else '' }}"
+               class="form-control" id="inputApiKey"/>
+      </div>
+
+      <div class="form-group" style="display:flex;align-items:center;gap:12px;padding-top:24px">
+        <label style="margin:0">WebAdmin Aktif</label>
+        <input type="checkbox" name="aktif" id="inputAktif"
+               {% if not yeni and sirket.wc_aktif %}checked{% endif %}
+               style="width:18px;height:18px"/>
+      </div>
+
+      <div style="grid-column:1/-1;display:flex;gap:12px;padding-top:8px">
+        <button type="submit" class="btn btn-primary" id="btnKaydet">
+          {{ 'Şirket Oluştur' if yeni else 'Kaydet' }}
+        </button>
+        <a href="{{ url_for('sirketler') }}" class="btn btn-ghost">İptal</a>
+      </div>
+    </div>
+  </form>
+</div>
+
+<!-- Kullanıcılar (sadece düzenleme modunda) -->
+{% if not yeni %}
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="2"/></svg>
+      Kullanıcılar ({{ kullanicilar|length }})
+    </h3>
+    <a href="{{ url_for('kullanici_yeni', musterino=sirket.musterino) }}"
+       class="btn btn-sm btn-success" id="btnYeniKullanici">
+      <svg viewBox="0 0 24 24" fill="none" style="width:14px;height:14px"><line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" stroke-width="2"/><line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2"/></svg>
+      Yeni Kullanıcı
+    </a>
+  </div>
+  <div class="table-wrapper">
+    <table class="table table-hover" id="kullanicilarTable">
+      <thead>
+        <tr>
+          <th>ID</th><th>Ad Soyad</th><th>Kullanıcı Adı</th>
+          <th>E-posta</th><th>Yetki</th><th>Paket</th><th>Lisans Bitiş</th><th>İşlem</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in kullanicilar %}
+        <tr class="{% if u.yetki in ['admin','superadmin'] %}row-highlight{% endif %}">
+          <td class="td-id">#{{ u.id }}</td>
+          <td>{{ u.ad }} {{ u.soyad }}</td>
+          <td>
+            <div class="user-avatar-sm">{{ u.kullanici_adi[0]|upper if u.kullanici_adi else '?' }}</div>
+            {{ u.kullanici_adi or '—' }}
+          </td>
+          <td>{{ u.eposta or '—' }}</td>
+          <td>
+            <span class="badge {% if u.yetki == 'superadmin' %}badge-superadmin{% elif u.yetki == 'admin' %}badge-admin{% else %}badge-user{% endif %}">
+              {{ u.yetki or 'user' }}
+            </span>
+          </td>
+          <td>{{ u.paket_turu or '—' }}</td>
+          <td>
+            {% if u.son_odeme %}
+              {% set today = now.strftime('%Y-%m-%d') %}
+              <span class="{% if u.son_odeme < today %}text-danger{% else %}text-success{% endif %}">{{ u.son_odeme }}</span>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+          <td style="display:flex;gap:6px">
+            <a href="{{ url_for('kullanici_duzenle', musterino=sirket.musterino, uid=u.id) }}"
+               class="btn btn-xs btn-primary">Düzenle</a>
+            <form method="POST" action="{{ url_for('kullanici_sil', musterino=sirket.musterino, uid=u.id) }}"
+                  onsubmit="return confirm('{{ u.kullanici_adi }} silinsin mi?')">
+              <button type="submit" class="btn btn-xs btn-danger">Sil</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-center text-muted">Henüz kullanıcı eklenmemiş.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
