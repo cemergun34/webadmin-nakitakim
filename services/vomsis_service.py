@@ -29,14 +29,25 @@ DEFAULT_API_URL = "https://developers.vomsis.com/api/v2"
 
 # ── Veritabanı işlemleri ──────────────────────────────────────────────────────
 
-def get_vomsis_bilgileri(userid: int) -> dict:
-    """vomsisbilgileri tablosundan kullanıcıya ait API bilgilerini döner."""
+def get_vomsis_bilgileri(userid: int, musterino: int = 1) -> dict:
+    """vomsisbilgileri tablosundan kullanıcıya ait API bilgilerini döner.
+    musterino ile şirket bazlı izolasyon sağlanır.
+    """
     conn = get_connection()
     try:
+        # Önce (userid, musterino) çiftiyle bak; bulamazsa sadece userid ile dene
         row = conn.execute(
-            "SELECT appkey, seckey, url FROM vomsisbilgileri WHERE userid=? LIMIT 1",
-            (userid,)
+            "SELECT appkey, seckey, url FROM vomsisbilgileri "
+            "WHERE userid=%s AND musterino=%s LIMIT 1",
+            (userid, musterino)
         ).fetchone()
+        if not row:
+            # Geriye dönük uyumluluk: musterino=1 varsayılan kaydına düş
+            row = conn.execute(
+                "SELECT appkey, seckey, url FROM vomsisbilgileri "
+                "WHERE userid=%s ORDER BY id ASC LIMIT 1",
+                (userid,)
+            ).fetchone()
         if row:
             return {
                 "success": True,
@@ -52,9 +63,12 @@ def get_vomsis_bilgileri(userid: int) -> dict:
         conn.close()
 
 
-def save_vomsis_bilgileri(userid: int, appkey: str, seckey: str,
+def save_vomsis_bilgileri(userid: int, musterino: int = 1,
+                          appkey: str = "", seckey: str = "",
                           url: str = DEFAULT_API_URL) -> dict:
-    """vomsisbilgileri tablosuna kayıt ekler veya günceller."""
+    """vomsisbilgileri tablosuna kayıt ekler veya günceller.
+    (userid, musterino) çifti uniq anahtardır.
+    """
     if not appkey or not seckey or not url:
         return {"success": False, "message": "Tüm alanları doldurunuz."}
 
@@ -62,24 +76,24 @@ def save_vomsis_bilgileri(userid: int, appkey: str, seckey: str,
     conn = get_connection()
     try:
         existing = conn.execute(
-            "SELECT id FROM vomsisbilgileri WHERE userid=? LIMIT 1",
-            (userid,)
+            "SELECT id FROM vomsisbilgileri WHERE userid=%s AND musterino=%s LIMIT 1",
+            (userid, musterino)
         ).fetchone()
 
         if existing:
             conn.execute(
                 """UPDATE vomsisbilgileri
                    SET appkey=%s, seckey=%s, url=%s, guncelleme_tarihi=%s
-                   WHERE userid=%s""",
-                (appkey, seckey, url, now, userid)
+                   WHERE userid=%s AND musterino=%s""",
+                (appkey, seckey, url, now, userid, musterino)
             )
             message = "Vomsis bilgileri güncellendi."
         else:
             conn.execute(
                 """INSERT INTO vomsisbilgileri
-                   (userid, appkey, seckey, url, kayit_tarihi, guncelleme_tarihi)
-                   VALUES (%s, %s, %s, %s, %s, %s)""",
-                (userid, appkey, seckey, url, now, now)
+                   (userid, musterino, appkey, seckey, url, kayit_tarihi, guncelleme_tarihi)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (userid, musterino, appkey, seckey, url, now, now)
             )
             message = "Vomsis bilgileri kaydedildi."
 

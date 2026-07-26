@@ -65,34 +65,28 @@ def sync_womsis():
 
     Request Body (JSON):
         {
-          "userid":     1,           (zorunlu)
-          "start_date": "2024-01-01",  (opsiyonel, varsayılan: 30 gün önce)
-          "end_date":   "2024-12-31"   (opsiyonel, varsayılan: bugün)
-        }
-
-    Response:
-        {
-          "success": true,
-          "count": 42,
-          "transactions": [...],
-          "timestamp": "2024-06-09T12:00:00"
+          "userid":     19,          (zorunlu)
+          "musterino": 1,            (opsiyonel, varsayılan: 1)
+          "start_date": "2024-01-01",
+          "end_date":   "2024-12-31"
         }
     """
     global _last_sync
-    body = request.get_json(silent=True) or {}
-    userid = body.get("userid", 1)
+    body     = request.get_json(silent=True) or {}
+    userid   = body.get("userid", 1)
+    musterino = int(body.get("musterino", 1))
 
-    # ── Aşama 0: Şirket profili (sirket_profili) kontrolü — sadece uyarı ──────
+    # ── Aşama 0: Şirket profili kontrolü ──────────────────────────────────────
     try:
         from db.connection import get_connection
         _conn = get_connection()
         try:
             _sp = _conn.execute(
-                "SELECT id FROM sirket_profili WHERE userid=%s LIMIT 1",
-                (userid,)
+                "SELECT id FROM sirket_profili WHERE musterino=%s LIMIT 1",
+                (musterino,)
             ).fetchone()
             if _sp is None:
-                logger.warning("sirket_profili bulunamadı — userid=%s (sync devam ediyor)", userid)
+                logger.warning("sirket_profili bulunamadı — musterino=%s (sync devam ediyor)", musterino)
         finally:
             _conn.close()
     except Exception as _sp_exc:
@@ -103,21 +97,22 @@ def sync_womsis():
         end_dt = datetime.now()
         if body.get("end_date"):
             end_dt = datetime.strptime(body["end_date"], "%Y-%m-%d")
-        start_dt = datetime(2026, 1, 1)  # Baştan sona çek
+        start_dt = datetime(2026, 1, 1)
         if body.get("start_date"):
             start_dt = datetime.strptime(body["start_date"], "%Y-%m-%d")
     except ValueError as e:
         return jsonify({"success": False, "error": f"Tarih formatı hatalı: {e}"}), 400
 
-    # Womsis bağlantı bilgilerini DB'den al
-    bilgi = get_vomsis_bilgileri(userid)
+    # Womsis bağlantı bilgilerini DB'den al — musterino ile şirket bazlı
+    bilgi = get_vomsis_bilgileri(userid, musterino)
     if not bilgi.get("appkey") or not bilgi.get("seckey"):
         return jsonify({
             "success": False,
-            "error": "Womsis API bilgileri tanımlı değil. Önce webadmin'den ayarlayın."
+            "error": f"Womsis API bilgileri tanımlı değil (userid={userid}, musterino={musterino}). "
+                     "Önce şirket ayarlarından Womsis bilgilerini kaydedin."
         }), 400
 
-    api_url = bilgi.get("url", "https://developers.vomsis.com/api/v2")
+    api_url = bilgi.get("url", DEFAULT_API_URL)
     appkey  = bilgi["appkey"]
     seckey  = bilgi["seckey"]
 
@@ -144,7 +139,8 @@ def sync_womsis():
         "error":     None,
     }
 
-    logger.info("Womsis sync tamamlandı: %d işlem (userid=%s)", len(transactions), userid)
+    logger.info("Womsis sync tamamlandı: %d işlem (userid=%s, musterino=%s)",
+                len(transactions), userid, musterino)
     return jsonify({
         "success":      True,
         "count":        len(transactions),
@@ -172,16 +168,19 @@ def sync_status():
 @womsis_bp.route("/test", methods=["POST"])
 @require_api_key
 def test_connection():
-    """Womsis bağlantısını test eder."""
-    body = request.get_json(silent=True) or {}
-    userid = body.get("userid", 1)
+    """Womsis bağlantısını test eder.
+    Body: {userid, musterino, appkey, seckey, url}
+    """
+    body      = request.get_json(silent=True) or {}
+    userid    = body.get("userid", 1)
+    musterino = int(body.get("musterino", 1))
 
-    bilgi = get_vomsis_bilgileri(userid)
-    api_url = bilgi.get("url", "https://developers.vomsis.com/api/v2")
+    bilgi   = get_vomsis_bilgileri(userid, musterino)
+    api_url = bilgi.get("url", DEFAULT_API_URL)
     appkey  = bilgi.get("appkey", "")
     seckey  = bilgi.get("seckey", "")
 
-    # Body'den override et
+    # Body'den override et (canlı test için)
     if body.get("appkey"):
         appkey = body["appkey"]
     if body.get("seckey"):

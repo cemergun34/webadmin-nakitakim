@@ -224,15 +224,43 @@ def sirket_detay(musterino):
     if not sirket:
         flash("Şirket bulunamadı.", "danger")
         return redirect(url_for("sirketler"))
+
     if request.method == "POST":
-        data   = request.form.to_dict()
-        result = update_sirket(musterino, data)
-        flash("✅ Şirket güncellendi." if result["success"] else f"Hata: {result.get('error')}",
-              "success" if result["success"] else "danger")
-        return redirect(url_for("sirket_detay", musterino=musterino))
+        action = request.form.get("action", "update_sirket")
+
+        if action == "update_womsis":
+            # Womsis konfigürasyonunu kaydet
+            userid_for_womsis = sirket.get("userid") or session.get("user_id")
+            result = save_vomsis_bilgileri(
+                userid    = int(userid_for_womsis),
+                musterino = musterino,
+                appkey    = request.form.get("w_appkey", "").strip(),
+                seckey    = request.form.get("w_seckey", "").strip(),
+                url       = request.form.get("w_url", "").strip()
+                            or "https://developers.vomsis.com/api/v2",
+            )
+            flash("✅ Womsis ayarları kaydedildi." if result["success"]
+                  else f"Womsis hatası: {result.get('message')}",
+                  "success" if result["success"] else "danger")
+            return redirect(url_for("sirket_detay", musterino=musterino))
+
+        else:  # update_sirket
+            data   = request.form.to_dict()
+            result = update_sirket(musterino, data)
+            flash("✅ Şirket güncellendi." if result["success"]
+                  else f"Hata: {result.get('error')}",
+                  "success" if result["success"] else "danger")
+            return redirect(url_for("sirket_detay", musterino=musterino))
+
     kullanicilar = get_sirket_users(musterino)
-    return render_template("sirket_detay.html", sirket=sirket,
-                           kullanicilar=kullanicilar, yeni=False)
+    # Womsis bilgilerini yükle (şirkete ait userid ile)
+    userid_for_womsis = sirket.get("userid") or session.get("user_id")
+    womsis_bilgi = get_vomsis_bilgileri(int(userid_for_womsis), musterino)
+    return render_template("sirket_detay.html",
+                           sirket=sirket,
+                           kullanicilar=kullanicilar,
+                           womsis_bilgi=womsis_bilgi,
+                           yeni=False)
 
 
 @app.route("/sirketler/<int:musterino>/sil", methods=["POST"])
@@ -242,6 +270,30 @@ def sirket_sil(musterino):
     flash("✅ Şirket silindi." if result["success"] else f"Hata: {result.get('error')}",
           "success" if result["success"] else "danger")
     return redirect(url_for("sirketler"))
+
+
+@app.route("/sirketler/<int:musterino>/womsis/test", methods=["POST"])
+@login_required
+def sirket_womsis_test(musterino):
+    """Şirket panelinden AJAX Womsis bağlantı testi."""
+    from services.vomsis_service import vomsis_test_connection
+    body    = request.get_json(silent=True) or {}
+    sirket  = get_sirket(musterino)
+    if not sirket:
+        return jsonify({"success": False, "error": "Şirket bulunamadı."}), 404
+
+    userid_for_womsis = sirket.get("userid") or session.get("user_id")
+    bilgi = get_vomsis_bilgileri(int(userid_for_womsis), musterino)
+
+    appkey  = body.get("appkey")  or bilgi.get("appkey", "")
+    seckey  = body.get("seckey")  or bilgi.get("seckey", "")
+    api_url = body.get("url")     or bilgi.get("url",    "https://developers.vomsis.com/api/v2")
+
+    if not appkey or not seckey:
+        return jsonify({"success": False, "error": "AppKey veya SecKey girilmemiş."}), 400
+
+    result = vomsis_test_connection(api_url, appkey, seckey)
+    return jsonify(result), 200 if result["success"] else 502
 
 
 # ── Kullanıcı ─────────────────────────────────────────────────────────────────
