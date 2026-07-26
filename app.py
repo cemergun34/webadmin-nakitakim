@@ -402,16 +402,35 @@ def scheduler():
                 flash("Geçersiz saat/dakika değeri.", "danger")
 
         elif action == "run_now":
+            start_str = request.form.get("start_date", "")
+            end_str   = request.form.get("end_date", "")
+
+            try:
+                from datetime import datetime, timedelta
+                end_dt   = datetime.strptime(end_str, "%Y-%m-%d").replace(hour=23, minute=59, second=59) if end_str else None
+                start_dt = datetime.strptime(start_str, "%Y-%m-%d") if start_str else None
+            except ValueError:
+                flash("Tarih formatı hatalı (YYYY-MM-DD).", "danger")
+                return redirect(url_for("scheduler"))
+
             import threading
-            t = threading.Thread(target=run_womsis_sync_job, daemon=True)
+            t = threading.Thread(target=run_womsis_sync_job, args=(start_dt, end_dt), daemon=True)
             t.start()
-            flash("⚡  Womsis sync başlatıldı — arka planda çalışıyor.", "success")
+            msg = "⚡ Womsis sync başlatıldı — arka planda çalışıyor."
+            if start_dt and end_dt:
+                msg += f" ({start_dt.strftime('%d.%m.%Y')} - {end_dt.strftime('%d.%m.%Y')})"
+            flash(msg, "success")
 
         return redirect(url_for("scheduler"))
 
     state = get_scheduler_state()
     logs  = get_sync_logs(limit=50)
-    return render_template("scheduler.html", state=state, logs=logs)
+    
+    from datetime import datetime, timedelta
+    today = datetime.now().strftime("%Y-%m-%d")
+    month_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+    return render_template("scheduler.html", state=state, logs=logs, today=today, month_ago=month_ago)
 
 
 # ── Context processor ─────────────────────────────────────────────────────────

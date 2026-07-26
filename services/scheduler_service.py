@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import datetime, timedelta
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -376,7 +377,7 @@ def _get_all_womsis_accounts() -> list[tuple[int, int]]:
 
 # ── Ana Job Fonksiyonu ────────────────────────────────────────────────────────
 
-def run_womsis_sync_job():
+def run_womsis_sync_job(start_dt: Optional[datetime] = None, end_dt: Optional[datetime] = None):
     """
     Tüm kullanıcılar için Womsis verisini çeker.
     Scheduler tarafından veya manuel tetiklendiğinde çağrılır.
@@ -389,9 +390,11 @@ def run_womsis_sync_job():
     _scheduler_state["last_status"] = "running"
     _scheduler_state["last_message"] = "İşlem devam ediyor..."
 
-    # Baştan sona çek: 2026-01-01'den bugüne
-    end_dt   = now.replace(hour=23, minute=59, second=59)
-    start_dt = datetime(2026, 1, 1, 0, 0, 0)
+    # Varsayılan: 2026-01-01'den bugüne
+    if not end_dt:
+        end_dt = now.replace(hour=23, minute=59, second=59)
+    if not start_dt:
+        start_dt = datetime(2026, 1, 1, 0, 0, 0)
 
     accounts = _get_all_womsis_accounts()
     if not accounts:

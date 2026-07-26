@@ -157,12 +157,25 @@
       </form>
 
       <!-- Manuel Tetikleme -->
-      <div style="margin-top:14px;">
+      <div style="margin-top:14px;border-top:1px solid #e2e8f0;padding-top:14px;">
+        <h4 style="font-size:13px;font-weight:600;margin-bottom:10px;color:#334155;">Manuel Veri Çek</h4>
         <form method="POST">
           <input type="hidden" name="action" value="run_now" />
+          
+          <div style="display:flex;gap:8px;margin-bottom:12px;">
+            <div style="flex:1;">
+              <label style="font-size:11px;color:#64748b;">Başlangıç Tarihi</label>
+              <input type="date" name="start_date" style="width:100%;padding:6px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;" value="{{ month_ago }}" max="{{ today }}" required>
+            </div>
+            <div style="flex:1;">
+              <label style="font-size:11px;color:#64748b;">Bitiş Tarihi</label>
+              <input type="date" name="end_date" style="width:100%;padding:6px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;" value="{{ today }}" max="{{ today }}" required>
+            </div>
+          </div>
+
           <button type="submit" class="btn btn-ghost" style="width:100%;"
-                  onclick="return confirm('Womsis sync şimdi çalıştırılsın mı?')">
-            ⚡ Şimdi Çalıştır
+                  onclick="return confirm('Womsis verileri tüm şirketler için manuel olarak çekilecek. Emin misiniz?')">
+            ⚡ Şimdi Çek
           </button>
         </form>
       </div>
