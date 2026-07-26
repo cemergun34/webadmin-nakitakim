@@ -149,7 +149,39 @@
         <span id="wTestResult" style="font-size:13px;font-weight:500"></span>
       </div>
     </div>
+    </div>
   </form>
+</div>
+
+<!-- Womsis Manuel Veri Çekme (sadece düzenleme modunda ve womsis açıksa mantıklı ama her zaman gösterilebilir) -->
+<div class="card" style="margin-top: 1rem;">
+  <div class="card-header">
+    <h3 class="card-title">
+      <svg viewBox="0 0 24 24" fill="none"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" stroke="currentColor" stroke-width="2"/><polyline points="17 6 23 6 23 12" stroke="currentColor" stroke-width="2"/></svg>
+      Womsis Manuel Veri Çekme
+    </h3>
+  </div>
+  <div class="card-body">
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>Başlangıç Tarihi</label>
+        {% set today = now.strftime('%Y-%m-%d') %}
+        {% set month_ago = (now - timedelta(days=30)).strftime('%Y-%m-%d') %}
+        <input type="date" id="mStartDate" value="{{ month_ago }}" class="form-control" />
+      </div>
+      <div class="form-group">
+        <label>Bitiş Tarihi</label>
+        <input type="date" id="mEndDate" value="{{ today }}" class="form-control" />
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:1rem;">
+      <button type="button" class="btn btn-primary" id="btnManualFetch" onclick="manualWomsisFetch()">
+        <svg viewBox="0 0 24 24" fill="none" style="width:14px;height:14px;margin-right:6px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke="currentColor" stroke-width="2"/><polyline points="7 10 12 15 17 10" stroke="currentColor" stroke-width="2"/><line x1="12" y1="15" x2="12" y2="3" stroke="currentColor" stroke-width="2"/></svg>
+        Verileri Çek
+      </button>
+    </div>
+    <div id="manualFetchResult" style="margin-top: 1rem;"></div>
+  </div>
 </div>
 
 <script>
@@ -187,6 +219,90 @@ function testWomsis() {
   .finally(() => {
     btn.disabled = false;
     btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" style="width:14px;height:14px;margin-right:6px"><path d="M5 12.55a11 11 0 0 1 14.08 0" stroke="currentColor" stroke-width="2"/><path d="M1.42 9a16 16 0 0 1 21.16 0" stroke="currentColor" stroke-width="2"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="20" r="1" stroke="currentColor" stroke-width="2"/></svg>Bağlantıyı Test Et';
+  });
+}
+
+function manualWomsisFetch() {
+  const btn = document.getElementById('btnManualFetch');
+  const res = document.getElementById('manualFetchResult');
+  const start = document.getElementById('mStartDate').value;
+  const end = document.getElementById('mEndDate').value;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner" style="margin-right:6px"></span> Çekiliyor...';
+  res.innerHTML = '<div class="text-muted">Lütfen bekleyin, veriler Womsis API\'den canlı olarak çekiliyor...</div>';
+
+  fetch("{{ url_for('womsis_fetch_manuel', musterino=sirket.musterino) }}", {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ start_date: start, end_date: end })
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (!d.success) {
+      res.innerHTML = '<div class="alert alert-danger">❌ ' + (d.message || 'Hata') + '</div>';
+      return;
+    }
+    
+    let html = `<div class="alert alert-success" style="margin-bottom:1rem">✅ <strong>Başarılı!</strong> ${d.message}</div>`;
+    
+    // Banka Tablosu
+    if (d.data && d.data.length > 0) {
+      html += `<h4>🏦 Banka Hareketleri (${d.data.length})</h4>
+      <div class="table-wrapper" style="max-height: 400px; overflow-y: auto; margin-bottom: 1.5rem">
+        <table class="table table-sm table-hover">
+          <thead><tr><th>Tarih</th><th>Banka</th><th>Hesap</th><th>Açıklama</th><th style="text-align:right">Tutar</th></tr></thead>
+          <tbody>`;
+      d.data.forEach(tx => {
+        const tdate = tx.date || tx.transactionDate || tx.valueDate || '—';
+        const tbank = tx.bankName || '—';
+        const tacc = tx.accountName || tx.account || '—';
+        const tdesc = tx.description || tx.aciklama || '—';
+        const tamt = tx.amount || tx.tutar || 0;
+        const col = parseFloat(tamt) > 0 ? '#16a34a' : '#dc2626';
+        html += `<tr>
+          <td>${tdate}</td>
+          <td>${tbank}</td>
+          <td>${tacc}</td>
+          <td>${tdesc}</td>
+          <td style="text-align:right; font-weight:bold; color:${col}">${tamt}</td>
+        </tr>`;
+      });
+      html += `</tbody></table></div>`;
+    }
+
+    // POS Tablosu
+    if (d.pos_data && d.pos_data.length > 0) {
+      html += `<h4>💳 POS Hareketleri (${d.pos_data.length})</h4>
+      <div class="table-wrapper" style="max-height: 400px; overflow-y: auto;">
+        <table class="table table-sm table-hover">
+          <thead><tr><th>Tarih</th><th>Durum</th><th>Kart No</th><th>Terminal No</th><th style="text-align:right">Tutar</th></tr></thead>
+          <tbody>`;
+      d.pos_data.forEach(tx => {
+        const pdate = tx.transactionDate || tx.date || '—';
+        const pstate = tx.state || '—';
+        const pcard = tx.creditCardNo || '—';
+        const pterm = tx.terminalNo || tx.posTerminalId || '—';
+        const pamt = tx.amount || tx.grossAmount || 0;
+        html += `<tr>
+          <td>${pdate}</td>
+          <td><span class="badge badge-sm badge-admin">${pstate}</span></td>
+          <td>${pcard}</td>
+          <td>${pterm}</td>
+          <td style="text-align:right; font-weight:bold; color:#16a34a">${pamt}</td>
+        </tr>`;
+      });
+      html += `</tbody></table></div>`;
+    }
+
+    res.innerHTML = html;
+  })
+  .catch(e => {
+    res.innerHTML = '<div class="alert alert-danger">❌ İstek hatası: ' + e + '</div>';
+  })
+  .finally(() => {
+    btn.disabled = false;
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" style="width:14px;height:14px;margin-right:6px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke="currentColor" stroke-width="2"/><polyline points="7 10 12 15 17 10" stroke="currentColor" stroke-width="2"/><line x1="12" y1="15" x2="12" y2="3" stroke="currentColor" stroke-width="2"/></svg>Verileri Çek';
   });
 }
 </script>

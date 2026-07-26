@@ -336,6 +336,26 @@ def kullanici_sil(musterino, uid):
     return redirect(url_for("sirket_detay", musterino=musterino))
 
 
+@app.route("/womsis/fetch_manuel/<int:musterino>", methods=["POST"])
+@login_required
+def womsis_fetch_manuel(musterino):
+    data = request.get_json() or {}
+    start_str = data.get("start_date")
+    end_str = data.get("end_date")
+    
+    from datetime import datetime
+    try:
+        end_dt = datetime.strptime(end_str, "%Y-%m-%d").replace(hour=23, minute=59, second=59) if end_str else None
+        start_dt = datetime.strptime(start_str, "%Y-%m-%d") if start_str else None
+    except Exception:
+        return jsonify({"success": False, "message": "Tarih formatı hatalı (YYYY-MM-DD)."}), 400
+        
+    from services.scheduler_service import _sync_account
+    userid = session["user_id"]
+    result = _sync_account(userid, musterino, start_dt, end_dt)
+    return jsonify(result)
+
+
 # ────────────────────────────────────────────────────────────────────────────
 
 # ────────────────────────────────────────────────────────────────────────────
