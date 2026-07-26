@@ -31,7 +31,7 @@
         <tr>
           <th>ID (musterino)</th>
           <th>Unvan</th>
-          <th>Vergi No</th>
+          <th>Vergi Dairesi / No</th>
           <th>İl / İlçe</th>
           <th>WebAdmin</th>
           <th>Kullanıcılar</th>
@@ -43,7 +43,12 @@
         <tr>
           <td class="td-id"><span class="badge badge-user">{{ '%04d'|format(s.musterino) }}</span></td>
           <td><strong>{{ s.unvan or '—' }}</strong></td>
-          <td>{{ s.vergino or '—' }}</td>
+          <td>
+            {% if s.vergidairesi %}
+              <span style="color:#64748b;font-size:11px">{{ s.vergidairesi }}</span><br>
+            {% endif %}
+            {{ s.vergino or '—' }}
+          </td>
           <td>{{ s.il or '—' }}{% if s.ilce %} / {{ s.ilce }}{% endif %}</td>
           <td>
             {% if s.aktif %}
