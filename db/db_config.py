@@ -11,10 +11,15 @@ import json
 import os
 from pathlib import Path
 
-# nakitAkim'in config dosyası
-_CONFIG_FILE = Path.home() / "NakitAkim" / "data" / "db_config.json"
+# nakitAkim'in config dosyası arama yolları
+_CONFIG_PATHS = [
+    Path.home() / "NakitAkim" / "data" / "db_config.json",
+    Path("C:/FPPRO/NakitAkim/data/db_config.json"),
+    Path("C:/NakitAkim/data/db_config.json"),
+    Path(__file__).parent.parent.parent / "NakitAkim" / "data" / "db_config.json"
+]
 
-_DEFAULTS: dict = {
+_DEFAULTS = {
     "mode":      "postgres",
     "pg_host":   "localhost",
     "pg_port":   5432,
@@ -24,20 +29,20 @@ _DEFAULTS: dict = {
     "pg_sslmode": "prefer",
 }
 
-
 def load_config() -> dict:
     """nakitAkim db_config.json'ı okur; yoksa varsayılan döner."""
     cfg = dict(_DEFAULTS)
-    if _CONFIG_FILE.exists():
-        try:
-            with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for k, v in data.items():
-                cfg[k] = v
-        except Exception:
-            pass
+    for p in _CONFIG_PATHS:
+        if p.exists():
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                for k, v in data.items():
+                    cfg[k] = v
+                break
+            except Exception:
+                pass
 
-    # Ortam değişkenleri her şeyin üzerinde
     for env_key, cfg_key in [
         ("PG_HOST",    "pg_host"),
         ("PG_PORT",    "pg_port"),
@@ -49,14 +54,18 @@ def load_config() -> dict:
         val = os.environ.get(env_key)
         if val:
             cfg[cfg_key] = val
-
     return cfg
-
 
 def get_pg_params() -> dict:
     """psycopg2.connect(**params) için dict döndürür."""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env", override=True)
+    except ImportError:
+        pass
+
     cfg = load_config()
-    params: dict = {
+    params = {
         "host":    cfg["pg_host"],
         "port":    int(cfg["pg_port"]),
         "dbname":  cfg["pg_db"],
