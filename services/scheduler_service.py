@@ -63,12 +63,15 @@ def _ensure_log_table():
         logger.warning("womsis_sync_log tablo kontrolü başarısız: %s", e)
 
 
-def _log_to_db(userid: int, tarih: str, durum: str, mesaj: str, cekilen: int = 0):
+def _log_to_db(userid: int, musterino: int, tarih: str, durum: str, mesaj: str, cekilen: int = 0):
     """Sync sonucunu DB'ye yazar (hata olursa sessizce atlar)."""
     try:
         from db.connection import get_connection
         conn = get_connection()
         try:
+            # Not: womsis_sync_log tablosunda musterino kolonu yoksa hatayı yakalar, 
+            # ancak biz bu tabloya şimdilik sadece userid yazıyoruz.
+            # İleride musterino eklenebilir. Şimdilik userid kaydediyoruz.
             conn.execute(
                 """INSERT INTO womsis_sync_log
                    (userid, tarih, durum, mesaj, cekilen)
@@ -105,9 +108,9 @@ def get_sync_logs(limit: int = 50) -> list[dict]:
 
 # ── Tek Kullanıcı İçin Sync ──────────────────────────────────────────────────
 
-def _sync_user(userid: int, start_dt: datetime, end_dt: datetime) -> dict:
+def _sync_account(userid: int, musterino: int, start_dt: datetime, end_dt: datetime) -> dict:
     """
-    Bir kullanıcı için Womsis verilerini çeker.
+    Bir hesap (userid + musterino) için Womsis verilerini çeker.
     Döner: {"success": bool, "count": int, "message": str}
     """
     from services.vomsis_service import (
@@ -115,7 +118,7 @@ def _sync_user(userid: int, start_dt: datetime, end_dt: datetime) -> dict:
         vomsis_get_all_transactions_chunked
     )
 
-    bilgi = get_vomsis_bilgileri(userid)
+    bilgi = get_vomsis_bilgileri(userid, musterino)
     if not bilgi.get("appkey") or not bilgi.get("seckey"):
         return {"success": False, "count": 0,
                 "message": "Womsis API bilgileri tanımlı değil."}
@@ -130,7 +133,7 @@ def _sync_user(userid: int, start_dt: datetime, end_dt: datetime) -> dict:
         txs = vomsis_get_all_transactions_chunked(api_url, token, start_dt, end_dt)
         
         # ── DB'ye kaydet (womsis_banka) ──────────────────────────────────────
-        saved, skipped = _save_womsis_to_db(txs, userid=1, musterino=1)
+        saved, skipped = _save_womsis_to_db(txs, userid=userid, musterino=musterino)
         
         # ── POS Verilerini Çek ve Kaydet ─────────────────────────────────────
         from services.vomsis_service import vomsis_get_terminals, vomsis_get_terminal_transactions
@@ -149,7 +152,7 @@ def _sync_user(userid: int, start_dt: datetime, end_dt: datetime) -> dict:
                     term_txs = vomsis_get_terminal_transactions(api_url, token, t_id, b_str, e_str)
                     if term_txs:
                         pos_txs_total.extend(term_txs)
-                        ps, psk = _save_womsis_pos_to_db(term_txs, t_id, userid=1, musterino=1)
+                        ps, psk = _save_womsis_pos_to_db(term_txs, t_id, userid=userid, musterino=musterino)
                         pos_saved += ps
                         pos_skipped += psk
 
@@ -352,18 +355,18 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
     return saved, skipped
 
 
-def _get_all_userids() -> list[int]:
-    """Womsis bilgisi tanımlı tüm kullanıcıları döner."""
+def _get_all_womsis_accounts() -> list[tuple[int, int]]:
+    """Womsis bilgisi tanımlı tüm (userid, musterino) çiftlerini döner."""
     try:
         from db.connection import get_connection
         conn = get_connection()
         try:
             rows = conn.execute(
-                "SELECT DISTINCT userid FROM vomsisbilgileri "
+                "SELECT userid, musterino FROM vomsisbilgileri "
                 "WHERE appkey IS NOT NULL AND appkey != '' "
                 "AND seckey IS NOT NULL AND seckey != ''"
             ).fetchall()
-            return [r[0] for r in rows]
+            return [(r[0], r[1]) for r in rows]
         finally:
             conn.close()
     except Exception as e:
@@ -390,38 +393,38 @@ def run_womsis_sync_job():
     end_dt   = now.replace(hour=23, minute=59, second=59)
     start_dt = datetime(2026, 1, 1, 0, 0, 0)
 
-    userids = _get_all_userids()
-    if not userids:
-        msg = "Womsis tanımlı kullanıcı bulunamadı."
+    accounts = _get_all_womsis_accounts()
+    if not accounts:
+        msg = "Womsis tanımlı hesap bulunamadı."
         logger.warning(msg)
         _scheduler_state["last_status"]  = "warning"
         _scheduler_state["last_message"] = msg
         return
 
-    logger.info("  %d kullanıcı işlenecek: %s", len(userids), userids)
+    logger.info("  %d Womsis hesabı işlenecek: %s", len(accounts), accounts)
 
     total_fetched = 0
     errors        = []
 
-    for uid in userids:
-        result = _sync_user(uid, start_dt, end_dt)
+    for uid, mus in accounts:
+        result = _sync_account(uid, mus, start_dt, end_dt)
         cnt    = result.get("count", 0)
         total_fetched += cnt
 
         durum = "success" if result["success"] else "error"
-        _log_to_db(uid, tarih_str, durum, result["message"], cnt)
+        _log_to_db(uid, mus, tarih_str, durum, result["message"], cnt)
 
         if result["success"]:
-            logger.info("  ✅  userid=%d → %d işlem", uid, cnt)
+            logger.info("  ✅  userid=%d, musterino=%d → %d işlem", uid, mus, cnt)
         else:
-            logger.error("  ❌  userid=%d → %s", uid, result["message"])
-            errors.append(f"userid={uid}: {result['message']}")
+            logger.error("  ❌  userid=%d, musterino=%d → %s", uid, mus, result["message"])
+            errors.append(f"uid={uid}/mus={mus}: {result['message']}")
 
     if errors:
         final_msg = f"{total_fetched} çekildi, hatalar: {'; '.join(errors)}"
         _scheduler_state["last_status"] = "partial"
     else:
-        final_msg = f"{len(userids)} kullanıcı, toplam {total_fetched} işlem çekildi."
+        final_msg = f"{len(accounts)} hesap, toplam {total_fetched} işlem çekildi."
         _scheduler_state["last_status"] = "success"
 
     _scheduler_state["last_message"] = final_msg
