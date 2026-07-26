@@ -21,11 +21,11 @@ _CONFIG_PATHS = [
 
 _DEFAULTS = {
     "mode":      "postgres",
-    "pg_host":   "localhost",
+    "pg_host":   "178.233.204.224",
     "pg_port":   5432,
-    "pg_db":     "nakit_akim",
+    "pg_db":     "neondb",
     "pg_user":   "postgres",
-    "pg_pass":   "",
+    "pg_pass":   "123",
     "pg_sslmode": "prefer",
 }
 
