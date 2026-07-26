@@ -460,6 +460,7 @@ def inject_globals():
             "username": session.get("username"),
             "yetki":    session.get("yetki"),
             "firmaadi": session.get("firmaadi"),
+        },
         "now": datetime.now(),
         "timedelta": timedelta,
     }
