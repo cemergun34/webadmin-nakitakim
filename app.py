@@ -35,7 +35,6 @@ from services.vomsis_service import (
     vomsis_get_accounts, vomsis_get_banks,
     vomsis_test_connection, DEFAULT_API_URL,
 )
-from api.auth import auth_bp
 from api.womsis_api import womsis_bp
 from api.fatura_api import fatura_bp
 from services.scheduler_service import (
@@ -57,7 +56,6 @@ app.config["WEBADMIN_API_KEY"] = WEBADMIN_API_KEY
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
 
 # Blueprint kayıt
-app.register_blueprint(auth_bp)
 app.register_blueprint(womsis_bp)
 app.register_blueprint(fatura_bp)
 
