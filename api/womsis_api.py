@@ -27,6 +27,8 @@ from services.vomsis_service import (
     vomsis_get_accounts,
     vomsis_get_banks,
     vomsis_test_connection,
+    vomsis_get_terminals,
+    vomsis_get_terminal_transactions,
 )
 
 logger = logging.getLogger(__name__)
@@ -147,6 +149,115 @@ def sync_womsis():
         "transactions": transactions,
         "timestamp":    now_str,
         "period":       {
+            "start": start_dt.strftime("%Y-%m-%d"),
+            "end":   end_dt.strftime("%Y-%m-%d"),
+        }
+    })
+
+
+@womsis_bp.route("/pos-sync", methods=["POST"])
+@require_api_key
+def pos_sync_womsis():
+    """
+    nakitAkim'den POST tetiklendiğinde Womsis POS terminal verilerini çeker
+    ve womsi_pos tablosuna kaydeder.
+
+    Banka hareketi sync (/api/womsis/sync) ile birebir aynı mimari.
+
+    Request Body (JSON):
+        {
+          "userid":     19,
+          "musterino":  1,
+          "start_date": "2026-01-01",
+          "end_date":   "2026-07-27"
+        }
+    """
+    body      = request.get_json(silent=True) or {}
+    userid    = body.get("userid", 1)
+    musterino = int(body.get("musterino", 1))
+
+    # ── Tarih aralığı ──────────────────────────────────────────────────────────
+    try:
+        end_dt = datetime.now()
+        if body.get("end_date"):
+            end_dt = datetime.strptime(body["end_date"], "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59
+            )
+        start_dt = datetime(2026, 1, 1)
+        if body.get("start_date"):
+            start_dt = datetime.strptime(body["start_date"], "%Y-%m-%d")
+    except ValueError as e:
+        return jsonify({"success": False, "error": f"Tarih formatı hatalı: {e}"}), 400
+
+    # ── Womsis bağlantı bilgileri ──────────────────────────────────────────────
+    bilgi = get_vomsis_bilgileri(userid, musterino)
+    if not bilgi.get("appkey") or not bilgi.get("seckey"):
+        return jsonify({
+            "success": False,
+            "error":   f"Womsis API bilgileri tanımlı değil (userid={userid}, musterino={musterino})."
+        }), 400
+
+    api_url = bilgi.get("url", "https://developers.vomsis.com/api/v2")
+    token, err = vomsis_authenticate(api_url, bilgi["appkey"], bilgi["seckey"])
+    if not token:
+        return jsonify({"success": False, "error": err}), 502
+
+    # ── Terminal listesini al ──────────────────────────────────────────────────
+    try:
+        terminals = vomsis_get_terminals(api_url, token)
+    except Exception as e:
+        logger.error("Womsis terminal listesi hatası: %s", e)
+        return jsonify({"success": False, "error": f"Terminal listesi alınamadı: {e}"}), 500
+
+    if not terminals:
+        return jsonify({
+            "success": True,
+            "count":   0,
+            "saved":   0,
+            "skipped": 0,
+            "message": "Womsis'te tanımlı terminal bulunamadı.",
+            "period":  {"start": start_dt.strftime("%Y-%m-%d"), "end": end_dt.strftime("%Y-%m-%d")},
+        })
+
+    # ── Her terminal için 7 günlük parçalar hâlinde veri çek ──────────────────
+    from services.scheduler_service import _save_womsis_pos_to_db
+
+    total_fetched = 0
+    total_saved   = 0
+    total_skipped = 0
+    now_str = datetime.now().isoformat()
+
+    b_str = start_dt.strftime("%d-%m-%Y %H:%M:%S")
+    e_str = end_dt.strftime("%d-%m-%Y %H:%M:%S")
+
+    for term in terminals:
+        t_id = term.get("stationId") or term.get("id") or term.get("terminalId")
+        if not t_id:
+            continue
+        try:
+            term_txs = vomsis_get_terminal_transactions(api_url, token, t_id, b_str, e_str)
+            if term_txs:
+                total_fetched += len(term_txs)
+                ps, psk = _save_womsis_pos_to_db(
+                    term_txs, str(t_id), userid=userid, musterino=musterino
+                )
+                total_saved   += ps
+                total_skipped += psk
+                logger.info("POS sync — terminal %s: %d çekildi, %d kaydedildi, %d atlandı",
+                            t_id, len(term_txs), ps, psk)
+        except Exception as te:
+            logger.warning("Terminal %s hatası: %s", t_id, te)
+
+    logger.info("Womsis POS sync tamamlandı: %d çekildi, %d kaydedildi (userid=%s, musterino=%s)",
+                total_fetched, total_saved, userid, musterino)
+
+    return jsonify({
+        "success":   True,
+        "count":     total_fetched,
+        "saved":     total_saved,
+        "skipped":   total_skipped,
+        "timestamp": now_str,
+        "period":    {
             "start": start_dt.strftime("%Y-%m-%d"),
             "end":   end_dt.strftime("%Y-%m-%d"),
         }
