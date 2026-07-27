@@ -179,6 +179,7 @@ def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) 
     saved   = 0
     skipped = 0
     now     = datetime.now()
+    conn    = None   # UnboundLocalError'u önlemek için önceden None yap
 
     try:
         from db.connection import get_connection
@@ -246,14 +247,20 @@ def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) 
 
         conn.commit()
         cur.close()
-        conn.close()
     except Exception as e:
         logger.error('womsis DB kayit hatasi: %s', e, exc_info=True)
-        try:
-            conn.rollback()
-            conn.close()
-        except Exception:
-            pass
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    finally:
+        # Baglanti her durumda kapatilir — baglanti sizintisini onler
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     return saved, skipped
 
@@ -269,6 +276,7 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
     saved   = 0
     skipped = 0
     now     = datetime.now()
+    conn    = None   # UnboundLocalError'u önlemek için önceden None yap
 
     try:
         from db.connection import get_connection
@@ -309,7 +317,6 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
             aciklama = str(tx.get('description') or tx.get('aciklama') or '')[:255]
 
             # Mükerrer kontrolü
-            # POS'ta uniq id yoksa tarih, tutar ve kartno ile kontrol et
             tx_id = str(tx.get('id') or tx.get('transactionId') or '')
             if tx_id:
                 cur.execute('SELECT id FROM womsi_pos WHERE kayittarihi = %s AND userid = %s LIMIT 1', (tx_id, userid))
@@ -325,7 +332,6 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
                     skipped += 1
                     continue
 
-            # Tabloya kaydet (kayittarihi alanına uniq tx_id koyuyoruz ki sonraki çekimde kontrol edilebilsin)
             cur.execute("""
                 INSERT INTO womsi_pos
                     (userid, islemtutari, isyeriucretitutar, nettutar, musterino,
@@ -344,14 +350,20 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
 
         conn.commit()
         cur.close()
-        conn.close()
     except Exception as e:
         logger.error('womsi_pos DB kayit hatasi: %s', e, exc_info=True)
-        try:
-            conn.rollback()
-            conn.close()
-        except Exception:
-            pass
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    finally:
+        # Baglanti her durumda kapatilir — baglanti sizintisini onler
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     return saved, skipped
 

@@ -18,7 +18,14 @@ _pg_local = threading.local()
 def _try_pg_connect(params: dict):
     import psycopg2
     try:
-        raw = psycopg2.connect(**params)
+        connect_params = dict(params)
+        # TCP keepalive: Neon/Supabase gibi bulut DB'lerde uzun
+        # bekleme sonrasi baglanti kopmasin
+        connect_params.setdefault('keepalives', 1)
+        connect_params.setdefault('keepalives_idle', 30)
+        connect_params.setdefault('keepalives_interval', 10)
+        connect_params.setdefault('keepalives_count', 5)
+        raw = psycopg2.connect(**connect_params)
         raw.autocommit = False
         return raw
     except psycopg2.OperationalError as exc:
