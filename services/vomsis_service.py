@@ -154,11 +154,18 @@ def _vomsis_get(api_url: str, token: str, timeout: int = 20) -> dict:
             headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             timeout=timeout
         )
+        if resp.status_code == 404:
+            logger.debug("VOMSİS 404 [%s]", api_url)
+            return {}
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        logger.debug("VOMSİS GET OK [%s] status=%s keys=%s",
+                     api_url, resp.status_code, list(data.keys()) if isinstance(data, dict) else type(data).__name__)
+        return data
     except Exception as e:
-        logger.error("VOMSİS GET hatası [%s]: %s", api_url, e)
+        logger.warning("VOMSİS GET hatası [%s]: %s", api_url, e)
         return {}
+
 
 
 def vomsis_get_banks(api_base: str, token: str) -> list:

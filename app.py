@@ -356,6 +356,54 @@ def womsis_fetch_manuel(musterino):
     return jsonify(result)
 
 
+@app.route("/sirketler/<int:musterino>/pos-debug", methods=["POST"])
+@login_required
+def pos_debug(musterino):
+    """POS endpoint keşif — hangi Womsis URL'nin çalıştığını döner."""
+    import requests as req
+    body = request.get_json(silent=True) or {}
+    start_str = body.get("start_date", "01-01-2026 00:00:00")
+    end_str   = body.get("end_date",   "27-07-2026 23:59:59")
+
+    sirket = get_sirket(musterino)
+    if not sirket:
+        return jsonify({"success": False, "error": "Şirket bulunamadı."}), 404
+
+    userid_for_womsis = sirket.get("userid") or session.get("user_id")
+    bilgi = get_vomsis_bilgileri(int(userid_for_womsis), musterino)
+    if not bilgi.get("appkey"):
+        return jsonify({"success": False, "error": "Womsis bilgileri tanımlı değil."}), 400
+
+    api_url = bilgi.get("url", "https://developers.vomsis.com/api/v2")
+    from services.vomsis_service import vomsis_authenticate
+    token, err = vomsis_authenticate(api_url, bilgi["appkey"], bilgi["seckey"])
+    if not token:
+        return jsonify({"success": False, "error": f"Token alınamadı: {err}"}), 502
+
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    test_paths = [
+        "/pos-rapor/stations",
+        "/pos/stations",
+        "/womsiPos/stations",
+        "/terminals",
+        f"/pos/transactions?beginDate={start_str}&endDate={end_str}",
+        f"/pos-rapor/transactions?beginDate={start_str}&endDate={end_str}",
+        f"/womsiPos/transactions?beginDate={start_str}&endDate={end_str}",
+        f"/womsiPos?beginDate={start_str}&endDate={end_str}",
+    ]
+    results = []
+    for path in test_paths:
+        url = api_url.rstrip("/") + path
+        try:
+            r = req.get(url, headers=headers, timeout=15)
+            body_keys = list(r.json().keys()) if r.headers.get("content-type","").startswith("application/json") else []
+            results.append({"path": path, "status": r.status_code, "keys": body_keys})
+        except Exception as e:
+            results.append({"path": path, "status": "ERR", "error": str(e)})
+
+    return jsonify({"success": True, "api_url": api_url, "endpoints": results})
+
+
 # ────────────────────────────────────────────────────────────────────────────
 
 # ────────────────────────────────────────────────────────────────────────────

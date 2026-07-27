@@ -255,20 +255,32 @@ function manualWomsisFetch() {
           <tbody>`;
       d.data.forEach(tx => {
         const tdate = tx.date || tx.transactionDate || tx.valueDate || '—';
-        const tbank = tx.bankName || tx.bank || '—';
-        // tx.account bazen nesne döner, güvenli string'e çevir
-        let tacc = tx.accountName || tx.accountNo || tx.iban || '—';
-        if (!tacc || tacc === '—') {
-          const raw = tx.account;
-          if (raw && typeof raw === 'object') {
-            tacc = raw.name || raw.accountName || raw.accountNo || raw.iban || JSON.stringify(raw);
-          } else if (raw) {
-            tacc = String(raw);
+
+        // tx.account = { account_number, bank:{bank_title}, branch_name, iban, ... }
+        let tbank = '—';
+        let tacc  = '—';
+
+        const acc = tx.account;
+        if (acc && typeof acc === 'object') {
+          // Banka adı: account.bank.bank_title
+          const b = acc.bank;
+          if (b && typeof b === 'object') {
+            tbank = b.bank_title || b.bank_name || '—';
           }
+          // Hesap: şube + hesap no
+          const accNo = acc.formatted_account_number || acc.account_number || '';
+          const branch = acc.branch_name || '';
+          tacc = branch && accNo ? `${branch} / ${accNo}`
+               : (accNo || acc.iban || '—');
+        } else {
+          // Düz string veya başka alanlar
+          tbank = tx.bankName || (typeof tx.bank === 'string' ? tx.bank : '—');
+          tacc  = tx.accountName || tx.accountNo || tx.iban || (acc ? String(acc) : '—');
         }
+
         const tdesc = tx.description || tx.explanation || tx.aciklama || '—';
-        const tamt = tx.amount || tx.tutar || 0;
-        const col = parseFloat(tamt) > 0 ? '#16a34a' : '#dc2626';
+        const tamt  = tx.amount || tx.tutar || 0;
+        const col   = parseFloat(tamt) >= 0 ? '#16a34a' : '#dc2626';
         html += `<tr>
           <td>${tdate}</td>
           <td>${tbank}</td>
@@ -278,6 +290,7 @@ function manualWomsisFetch() {
         </tr>`;
       });
       html += `</tbody></table></div>`;
+
     }
 
     // POS Tablosu
