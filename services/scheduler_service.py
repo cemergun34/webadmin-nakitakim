@@ -137,25 +137,36 @@ def _sync_account(userid: int, musterino: int, start_dt: datetime, end_dt: datet
         saved, skipped = _save_womsis_to_db(txs, userid=userid, musterino=musterino)
         
         # ── POS Verilerini Çek ve Kaydet ─────────────────────────────────────
-        from services.vomsis_service import vomsis_get_terminals, vomsis_get_terminal_transactions
-        terminals = vomsis_get_terminals(api_url, token)
+        from services.vomsis_service import (
+            vomsis_get_terminals, vomsis_get_terminal_transactions,
+            vomsis_get_pos_transactions_direct
+        )
+        b_str = start_dt.strftime("%d-%m-%Y %H:%M:%S")
+        e_str = end_dt.strftime("%d-%m-%Y %H:%M:%S")
         pos_txs_total = []
         pos_saved = 0
         pos_skipped = 0
 
+        terminals = vomsis_get_terminals(api_url, token)
         if terminals:
-            # beginDate / endDate string format for POS
-            b_str = start_dt.strftime("%d-%m-%Y %H:%M:%S")
-            e_str = end_dt.strftime("%d-%m-%Y %H:%M:%S")
             for term in terminals:
                 t_id = term.get("stationId") or term.get("id") or term.get("terminalId")
                 if t_id:
                     term_txs = vomsis_get_terminal_transactions(api_url, token, t_id, b_str, e_str)
                     if term_txs:
                         pos_txs_total.extend(term_txs)
-                        ps, psk = _save_womsis_pos_to_db(term_txs, t_id, userid=userid, musterino=musterino)
+                        ps, psk = _save_womsis_pos_to_db(term_txs, str(t_id), userid=userid, musterino=musterino)
                         pos_saved += ps
                         pos_skipped += psk
+        else:
+            # Terminal tabanlı endpoint boş — direkt POS endpoint dene
+            logger.info("Terminal listesi boş, direct POS endpoint deneniyor...")
+            direct_txs = vomsis_get_pos_transactions_direct(api_url, token, b_str, e_str)
+            if direct_txs:
+                pos_txs_total.extend(direct_txs)
+                ps, psk = _save_womsis_pos_to_db(direct_txs, '', userid=userid, musterino=musterino)
+                pos_saved += ps
+                pos_skipped += psk
 
         return {
             "success": True,

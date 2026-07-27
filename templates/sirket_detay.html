@@ -255,9 +255,18 @@ function manualWomsisFetch() {
           <tbody>`;
       d.data.forEach(tx => {
         const tdate = tx.date || tx.transactionDate || tx.valueDate || '—';
-        const tbank = tx.bankName || '—';
-        const tacc = tx.accountName || tx.account || '—';
-        const tdesc = tx.description || tx.aciklama || '—';
+        const tbank = tx.bankName || tx.bank || '—';
+        // tx.account bazen nesne döner, güvenli string'e çevir
+        let tacc = tx.accountName || tx.accountNo || tx.iban || '—';
+        if (!tacc || tacc === '—') {
+          const raw = tx.account;
+          if (raw && typeof raw === 'object') {
+            tacc = raw.name || raw.accountName || raw.accountNo || raw.iban || JSON.stringify(raw);
+          } else if (raw) {
+            tacc = String(raw);
+          }
+        }
+        const tdesc = tx.description || tx.explanation || tx.aciklama || '—';
         const tamt = tx.amount || tx.tutar || 0;
         const col = parseFloat(tamt) > 0 ? '#16a34a' : '#dc2626';
         html += `<tr>

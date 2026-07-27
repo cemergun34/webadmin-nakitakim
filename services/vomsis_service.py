@@ -215,28 +215,86 @@ def vomsis_get_all_transactions_chunked(api_base: str, token: str,
 
 
 def vomsis_get_terminals(api_base: str, token: str) -> list:
-    data = _vomsis_get(f"{api_base.rstrip('/')}/pos-rapor/stations", token)
-    logger.info("pos-rapor/stations ham yanıt anahtarları: %s | veri sayısı: %s",
-                list(data.keys()) if data else "BOŞ/HATA",
-                len(data.get("data", data.get("stations", data.get("terminals", [])))))
-    # Farklı API versiyonlarının döndürebileceği key'leri dene
-    return (
-        data.get("data") or
-        data.get("stations") or
-        data.get("terminals") or
-        data.get("pos_stations") or
-        []
-    )
+    """POS terminal/station listesini çeker — birden fazla endpoint formatı denenir."""
+    # Deneme sırası: yeni → eski API formatları
+    candidate_paths = [
+        "/pos-rapor/stations",
+        "/pos/stations",
+        "/womsiPos/stations",
+        "/terminals",
+    ]
+    for path in candidate_paths:
+        data = _vomsis_get(f"{api_base.rstrip('/')}{path}", token)
+        if data:
+            result = (
+                data.get("data") or
+                data.get("stations") or
+                data.get("terminals") or
+                data.get("pos_stations") or
+                []
+            )
+            if result:
+                logger.info("POS terminaller bulundu [%s]: %d adet", path, len(result))
+                return result
+    logger.warning("POS terminal listesi boş döndü — tüm endpoint'ler denendi.")
+    return []
 
 
 def vomsis_get_terminal_transactions(api_base: str, token: str,
                                       terminal_id, begin_date: str,
                                       end_date: str) -> list:
+    """Belirli terminal için POS işlemlerini çeker — birden fazla endpoint denenir."""
     from urllib.parse import urlencode
     params = urlencode({"beginDate": begin_date, "endDate": end_date})
-    url = f"{api_base.rstrip('/')}/pos-rapor/stations/{terminal_id}/transactions?{params}"
-    data = _vomsis_get(url, token)
-    return data.get("transactions", [])
+    # Endpoint adayları
+    candidate_urls = [
+        f"{api_base.rstrip('/')}/pos-rapor/stations/{terminal_id}/transactions?{params}",
+        f"{api_base.rstrip('/')}/pos/stations/{terminal_id}/transactions?{params}",
+        f"{api_base.rstrip('/')}/pos-rapor/{terminal_id}/transactions?{params}",
+    ]
+    for url in candidate_urls:
+        data = _vomsis_get(url, token)
+        if data:
+            result = (
+                data.get("transactions") or
+                data.get("data") or
+                data.get("posTransactions") or
+                []
+            )
+            if result:
+                logger.info("POS işlemler bulundu [terminal=%s, url=%s]: %d adet",
+                            terminal_id, url, len(result))
+                return result
+    return []
+
+
+def vomsis_get_pos_transactions_direct(api_base: str, token: str,
+                                       begin_date: str, end_date: str) -> list:
+    """
+    Terminal bazlı değil, doğrudan tüm POS işlemlerini tek endpoint'ten çeker.
+    Bazı Womsis API versiyonlarında /pos/transactions endpoint'i mevcuttur.
+    """
+    from urllib.parse import urlencode
+    params = urlencode({"beginDate": begin_date, "endDate": end_date})
+    candidate_paths = [
+        f"/pos/transactions?{params}",
+        f"/womsiPos/transactions?{params}",
+        f"/pos-rapor/transactions?{params}",
+    ]
+    for path in candidate_paths:
+        data = _vomsis_get(f"{api_base.rstrip('/')}{path}", token)
+        if data:
+            result = (
+                data.get("transactions") or
+                data.get("posTransactions") or
+                data.get("pos_transactions") or
+                data.get("data") or
+                []
+            )
+            if result:
+                logger.info("POS direct endpoint [%s]: %d kayıt", path, len(result))
+                return result
+    return []
 
 
 def vomsis_test_connection(api_base: str, app_key: str, app_secret: str) -> dict:
