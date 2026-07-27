@@ -216,7 +216,17 @@ def vomsis_get_all_transactions_chunked(api_base: str, token: str,
 
 def vomsis_get_terminals(api_base: str, token: str) -> list:
     data = _vomsis_get(f"{api_base.rstrip('/')}/pos-rapor/stations", token)
-    return data.get("data", [])
+    logger.info("pos-rapor/stations ham yanıt anahtarları: %s | veri sayısı: %s",
+                list(data.keys()) if data else "BOŞ/HATA",
+                len(data.get("data", data.get("stations", data.get("terminals", [])))))
+    # Farklı API versiyonlarının döndürebileceği key'leri dene
+    return (
+        data.get("data") or
+        data.get("stations") or
+        data.get("terminals") or
+        data.get("pos_stations") or
+        []
+    )
 
 
 def vomsis_get_terminal_transactions(api_base: str, token: str,
