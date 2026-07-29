@@ -136,7 +136,12 @@ def _sync_account(userid: int, musterino: int, start_dt: datetime, end_dt: datet
         # ── DB'ye kaydet (womsis_banka) ──────────────────────────────────────
         saved, skipped = _save_womsis_to_db(txs, userid=userid, musterino=musterino)
         
-        # ── POS Verilerini Çek ve Kaydet (14 günlük parçalar) ─────────────────
+        # ── POS Verilerini Çek ve Kaydet ─────────────────────────────────────
+        # PHP womsisPosIsle.php ile birebir aynı mantık:
+        #   - /pos-rapor/stations → terminal listesi
+        #   - Her station için: id, station_no, workplace_no, bank_title alınır
+        #   - /pos-rapor/stations/{id}/transactions?beginDate=DD-MM-YYYY&endDate=DD-MM-YYYY
+        #   - 14 günlük parçalara bölünür
         from services.vomsis_service import (
             vomsis_get_terminals, vomsis_get_terminal_transactions,
             vomsis_get_pos_transactions_direct
@@ -148,31 +153,46 @@ def _sync_account(userid: int, musterino: int, start_dt: datetime, end_dt: datet
 
         terminals = vomsis_get_terminals(api_url, token)
         if terminals:
-            for term in terminals:
-                t_id = term.get("stationId") or term.get("id") or term.get("terminalId")
-                if not t_id:
+            for station in terminals:
+                # PHP: $stationId, $stationNo, $workplaceNo, $bankTitle
+                station_id   = station.get("id")           or station.get("stationId")  or station.get("terminalId")
+                station_no   = station.get("station_no")   or station.get("stationNo")  or str(station_id or "")
+                workplace_no = station.get("workplace_no") or station.get("workplaceNo") or station.get("merchantNo") or ""
+                bank_title   = station.get("bank_title")   or station.get("bank_name")  or station.get("bankTitle")  or ""
+
+                if not station_id:
                     continue
-                # 14 günlük parçalar halinde çek
+
+                # 14 günlük parçalar halinde çek (PHP CHUNK_DAYS=14)
                 current_start = start_dt
                 while current_start <= end_dt:
                     current_end = current_start + timedelta(days=CHUNK_DAYS - 1)
                     if current_end > end_dt:
                         current_end = end_dt
-                    current_end = current_end.replace(hour=23, minute=59, second=59)
-
-                    b_str = current_start.strftime("%d-%m-%Y %H:%M:%S")
-                    e_str = current_end.strftime("%d-%m-%Y %H:%M:%S")
+                    # PHP: 'd-m-Y' formatı (saat YOK)
+                    b_str = current_start.strftime("%d-%m-%Y")
+                    e_str = current_end.strftime("%d-%m-%Y")
                     try:
-                        term_txs = vomsis_get_terminal_transactions(api_url, token, t_id, b_str, e_str)
+                        term_txs = vomsis_get_terminal_transactions(api_url, token, station_id, b_str, e_str)
                         if term_txs:
+                            # Her işleme station bilgilerini ekle (PHP'de $workplaceNo, $bankTitle doğrudan kullanılıyor)
+                            for tx in term_txs:
+                                tx.setdefault('_station_no',   station_no)
+                                tx.setdefault('_workplace_no', workplace_no)
+                                tx.setdefault('_bank_title',   bank_title)
                             pos_txs_total.extend(term_txs)
-                            ps, psk = _save_womsis_pos_to_db(term_txs, str(t_id), userid=userid, musterino=musterino)
+                            ps, psk = _save_womsis_pos_to_db(
+                                term_txs, station_no,
+                                userid=userid, musterino=musterino
+                            )
                             pos_saved += ps
                             pos_skipped += psk
+                            logger.info("POS terminal=%s (%s→%s): %d işlem, %d kaydedildi",
+                                        station_id, b_str, e_str, len(term_txs), ps)
                     except Exception as te:
-                        logger.warning("Terminal %s (%s-%s) hatası: %s", t_id, b_str, e_str, te)
+                        logger.warning("Terminal %s (%s→%s) hatası: %s", station_id, b_str, e_str, te)
 
-                    current_start = current_end + timedelta(seconds=1)
+                    current_start = current_end + timedelta(days=1)
         else:
             # Terminal tabanlı endpoint boş — direkt POS endpoint dene
             logger.info("Terminal listesi boş, direct POS endpoint deneniyor...")
@@ -181,10 +201,8 @@ def _sync_account(userid: int, musterino: int, start_dt: datetime, end_dt: datet
                 current_end = current_start + timedelta(days=CHUNK_DAYS - 1)
                 if current_end > end_dt:
                     current_end = end_dt
-                current_end = current_end.replace(hour=23, minute=59, second=59)
-
-                b_str = current_start.strftime("%d-%m-%Y %H:%M:%S")
-                e_str = current_end.strftime("%d-%m-%Y %H:%M:%S")
+                b_str = current_start.strftime("%d-%m-%Y")
+                e_str = current_end.strftime("%d-%m-%Y")
                 try:
                     direct_txs = vomsis_get_pos_transactions_direct(api_url, token, b_str, e_str)
                     if direct_txs:
@@ -193,9 +211,9 @@ def _sync_account(userid: int, musterino: int, start_dt: datetime, end_dt: datet
                         pos_saved += ps
                         pos_skipped += psk
                 except Exception as te:
-                    logger.warning("Direct POS (%s-%s) hatası: %s", b_str, e_str, te)
+                    logger.warning("Direct POS (%s→%s) hatası: %s", b_str, e_str, te)
 
-                current_start = current_end + timedelta(seconds=1)
+                current_start = current_end + timedelta(days=1)
 
         return {
             "success": True,
@@ -207,6 +225,7 @@ def _sync_account(userid: int, musterino: int, start_dt: datetime, end_dt: datet
         }
     except Exception as e:
         return {"success": False, "count": 0, "message": str(e)}
+
 
 def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) -> tuple[int, int]:
     """
@@ -324,17 +343,21 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
         cur  = conn.cursor()
 
         for tx in transactions:
-            # Temel alanları JSON'dan al
+            # ── Tarih ─────────────────────────────────────────────────────────
+            # PHP: $tx['date']
             raw_tarih = str(tx.get('date') or tx.get('transactionDate') or '')
             tarih_iso = now.strftime('%Y-%m-%d %H:%M:%S')
-            for fmt in ('%d-%m-%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+            for fmt in ('%d-%m-%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d', '%d-%m-%Y'):
                 try:
                     tarih_iso = datetime.strptime(raw_tarih[:len(fmt)], fmt).strftime('%Y-%m-%d %H:%M:%S')
                     break
                 except Exception:
                     continue
-            
-            hesaba_gecis = str(tx.get('valor') or tx.get('transfer_to_account_date') or tx.get('settlementDate') or tx.get('valueDate') or tx.get('paymentDate') or '')
+
+            # ── Hesaba Geçiş Tarihi ───────────────────────────────────────────
+            # PHP: $tx['valor'] ?? $tx['transfer_to_account_date']
+            hesaba_gecis = str(tx.get('valor') or tx.get('transfer_to_account_date') or
+                               tx.get('settlementDate') or tx.get('valueDate') or '')
             if hesaba_gecis:
                 for fmt in ('%d-%m-%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d', '%d-%m-%Y'):
                     try:
@@ -342,23 +365,35 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
                         break
                     except Exception:
                         pass
-                        
-            # Rakamlar
-            islemtutari = float(str(tx.get('gross_amount') or tx.get('amount') or tx.get('islemTutari') or tx.get('transactionAmount') or 0).replace(",", "."))
-            isyeriucreti = float(str(tx.get('commission') or tx.get('commissionAmount') or tx.get('fee') or tx.get('merchantCommissionAmount') or 0).replace(",", "."))
-            nettutar = float(str(tx.get('net_amount') or tx.get('netAmount') or tx.get('net') or tx.get('nettutar') or 0).replace(",", "."))
-            
-            # Kart ve POS bilgileri
-            posno = str(tx.get('station') or tx.get('stationNo') or tx.get('terminalNo') or tx.get('posNo') or posno_fallback or '')
-            brand = str(tx.get('sub_card_type') or tx.get('card_type') or tx.get('cardBrand') or tx.get('brand') or '')
-            kartno = str(tx.get('card_number') or tx.get('maskedCardNumber') or tx.get('maskedCardNo') or tx.get('cardNo') or '')
-            islemtipi = str(tx.get('transaction_type') or tx.get('type') or tx.get('transactionType') or '')
-            isyerino = str(tx.get('workplace') or tx.get('workplaceNo') or tx.get('merchantNo') or tx.get('merchantId') or '')
-            aciklama = str(tx.get('description') or tx.get('aciklama') or '')[:255]
-            carihesap = str(tx.get('bank_title') or tx.get('bankTitle') or '-')
 
-            # Mükerrer kontrolü
-            tx_id = str(tx.get('transaction_id') or tx.get('id') or tx.get('transactionId') or '')
+            # ── Rakamlar ─────────────────────────────────────────────────────
+            # PHP: (float)($tx['gross_amount'] ?? 0)
+            islemtutari  = float(str(tx.get('gross_amount') or tx.get('amount') or 0).replace(",", "."))
+            # PHP: (float)($tx['commission'] ?? 0)
+            isyeriucreti = float(str(tx.get('commission') or tx.get('commissionAmount') or 0).replace(",", "."))
+            # PHP: (float)($tx['net_amount'] ?? 0)
+            nettutar     = float(str(tx.get('net_amount') or tx.get('netAmount') or 0).replace(",", "."))
+
+            # ── Kart ve POS bilgileri ─────────────────────────────────────────
+            # PHP: $tx['station'] ?? $stationNo  (station nesnesinden gelen)
+            posno     = str(tx.get('station') or tx.get('_station_no') or posno_fallback or '')
+            # PHP: $tx['sub_card_type'] ?? $tx['card_type']
+            brand     = str(tx.get('sub_card_type') or tx.get('card_type') or '')
+            # PHP: $tx['card_number']
+            kartno    = str(tx.get('card_number') or tx.get('maskedCardNumber') or tx.get('maskedCardNo') or '')
+            # PHP: $tx['transaction_type']
+            islemtipi = str(tx.get('transaction_type') or tx.get('type') or '')
+            # PHP: $workplaceNo ?: ($tx['workplace'] ?? '')  (station'dan öncelikli)
+            isyerino  = str(tx.get('_workplace_no') or tx.get('workplace') or tx.get('workplaceNo') or '')
+            aciklama  = str(tx.get('description') or '')[:255]
+            # PHP: $bankTitle  (station'dan)
+            carihesap = str(tx.get('_bank_title') or tx.get('bank_title') or '-')
+
+            # PHP: date('d/m/Y')
+            islemtarih_str = now.strftime('%d/%m/%Y')
+
+            # ── Mükerrer kontrolü ─────────────────────────────────────────────
+            tx_id = str(tx.get('id') or tx.get('transactionId') or tx.get('transaction_id') or '')
             if tx_id:
                 cur.execute('SELECT id FROM womsi_pos WHERE kayittarihi = %s AND userid = %s LIMIT 1', (tx_id, userid))
                 if cur.fetchone():
@@ -366,8 +401,8 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
                     continue
             else:
                 cur.execute(
-                    'SELECT id FROM womsi_pos WHERE userid=%s AND islemtarihi=%s AND islemtutari=%s AND kartno=%s LIMIT 1',
-                    (userid, tarih_iso, islemtutari, kartno)
+                    'SELECT id FROM womsi_pos WHERE userid=%s AND islemtarihi=%s AND islemtutari=%s AND kartno=%s AND posno=%s LIMIT 1',
+                    (userid, tarih_iso, islemtutari, kartno, posno)
                 )
                 if cur.fetchone():
                     skipped += 1
@@ -384,7 +419,7 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
                      %s, %s, %s, %s, %s, %s)
             """, (
                 userid, islemtutari, isyeriucreti, nettutar, musterino,
-                tarih_iso, posno, tx_id, tarih_iso[:10], brand,
+                tarih_iso, posno, tx_id, islemtarih_str, brand,
                 kartno, islemtipi, isyerino, carihesap, hesaba_gecis, aciklama
             ))
             saved += 1

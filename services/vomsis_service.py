@@ -222,8 +222,12 @@ def vomsis_get_all_transactions_chunked(api_base: str, token: str,
 
 
 def vomsis_get_terminals(api_base: str, token: str) -> list:
-    """POS terminal/station listesini çeker — birden fazla endpoint formatı denenir."""
-    # Deneme sırası: yeni → eski API formatları
+    """
+    POS terminal/station listesini çeker.
+    PHP womsisPosIsle.php: /pos-rapor/stations
+    Her station nesnesi: {id, station_no, workplace_no, bank_title, ...}
+    """
+    # Önce PHP ile aynı primary endpoint dene
     candidate_paths = [
         "/pos-rapor/stations",
         "/pos/stations",
@@ -241,7 +245,9 @@ def vomsis_get_terminals(api_base: str, token: str) -> list:
                 []
             )
             if result:
-                logger.info("POS terminaller bulundu [%s]: %d adet", path, len(result))
+                logger.info("POS terminaller bulundu [%s]: %d adet — örnek: %s",
+                            path, len(result),
+                            list(result[0].keys()) if result else [])
                 return result
     logger.warning("POS terminal listesi boş döndü — tüm endpoint'ler denendi.")
     return []
@@ -250,10 +256,24 @@ def vomsis_get_terminals(api_base: str, token: str) -> list:
 def vomsis_get_terminal_transactions(api_base: str, token: str,
                                       terminal_id, begin_date: str,
                                       end_date: str) -> list:
-    """Belirli terminal için POS işlemlerini çeker — birden fazla endpoint denenir."""
+    """
+    Belirli terminal için POS işlemlerini çeker.
+    PHP womsisPosIsle.php: beginDate/endDate formatı 'd-m-Y' (DD-MM-YYYY, saat YOK)
+    Örnek: beginDate=01-07-2026, endDate=14-07-2026
+    """
     from urllib.parse import urlencode
-    params = urlencode({"beginDate": begin_date, "endDate": end_date})
-    # Endpoint adayları
+
+    # PHP ile aynı tarih formatına çevir: eğer 'DD-MM-YYYY HH:MM:SS' geliyorsa
+    # sadece 'DD-MM-YYYY' kısmını al
+    def _to_date_only(d: str) -> str:
+        return d[:10] if d else d  # 'DD-MM-YYYY HH:MM:SS' → 'DD-MM-YYYY'
+
+    begin_only = _to_date_only(begin_date)
+    end_only   = _to_date_only(end_date)
+
+    params = urlencode({"beginDate": begin_only, "endDate": end_only})
+
+    # Endpoint adayları (PHP primary'si önce)
     candidate_urls = [
         f"{api_base.rstrip('/')}/pos-rapor/stations/{terminal_id}/transactions?{params}",
         f"{api_base.rstrip('/')}/pos/stations/{terminal_id}/transactions?{params}",
@@ -269,9 +289,10 @@ def vomsis_get_terminal_transactions(api_base: str, token: str,
                 []
             )
             if result:
-                logger.info("POS işlemler bulundu [terminal=%s, url=%s]: %d adet",
-                            terminal_id, url, len(result))
+                logger.info("POS işlemler bulundu [terminal=%s]: %d adet (%s → %s)",
+                            terminal_id, len(result), begin_only, end_only)
                 return result
+    logger.debug("POS işlem bulunamadı [terminal=%s, %s → %s]", terminal_id, begin_only, end_only)
     return []
 
 
