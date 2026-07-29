@@ -273,8 +273,30 @@ def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) 
                 gelirgider = 'gelir' if float(tutar_raw) >= 0 else 'gider'
 
             aciklama  = str(tx.get('description') or tx.get('aciklama') or '')[:255]
-            sube      = str(tx.get('accountName') or tx.get('bankName') or tx.get('sube') or '')
-            iban      = str(tx.get('iban') or '')
+
+            # Womsis API, hesap bilgisini nested object olarak döner:
+            #   tx.account = { bank: {bank_title}, branch_name, iban, account_number, ... }
+            # Düz alan (accountName, bankName) yoksa nested yapıdan çek
+            _account_obj = tx.get('account') or {}
+            if isinstance(_account_obj, dict):
+                _bank_obj     = _account_obj.get('bank') or {}
+                _bank_title   = (_bank_obj.get('bank_title') or _bank_obj.get('bank_name') or '') if isinstance(_bank_obj, dict) else ''
+                _branch_name  = _account_obj.get('branch_name') or ''
+                _acc_no       = _account_obj.get('formatted_account_number') or _account_obj.get('account_number') or ''
+                _acc_iban     = _account_obj.get('iban') or ''
+                # Şube: "Banka Adı - Şube Adı" formatında birleştir
+                if _branch_name and _bank_title:
+                    sube = f"{_bank_title} - {_branch_name}"
+                elif _branch_name:
+                    sube = _branch_name
+                elif _bank_title:
+                    sube = _bank_title
+                else:
+                    sube = str(tx.get('accountName') or tx.get('bankName') or tx.get('sube') or '')
+            else:
+                sube = str(tx.get('accountName') or tx.get('bankName') or tx.get('sube') or str(_account_obj) if _account_obj else '')
+
+            iban      = str(tx.get('iban') or (_account_obj.get('iban') if isinstance(_account_obj, dict) else '') or '')
             bakiye    = float(tx.get('balance') or tx.get('bakiye') or 0)
             hesap_turu= str(tx.get('currency') or tx.get('hesap_turu') or 'TL')
             dekont_no = str(tx.get('referenceNo') or tx.get('dekont_no') or '')
