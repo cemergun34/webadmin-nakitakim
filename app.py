@@ -487,6 +487,17 @@ def scheduler():
                 msg += f" ({start_dt.strftime('%d.%m.%Y')} - {end_dt.strftime('%d.%m.%Y')})"
             flash(msg, "success")
 
+        elif action == "stop_scheduler":
+            stop_scheduler()
+            flash("⏹ Zamanlayıcı durduruldu.", "warning")
+
+        elif action == "start_scheduler":
+            state = get_scheduler_state()
+            hour   = state.get("hour", 0)
+            minute = state.get("minute", 0)
+            start_scheduler(hour=hour, minute=minute)
+            flash(f"▶ Zamanlayıcı başlatıldı — her gün {hour:02d}:{minute:02d}'de çalışacak.", "success")
+
         return redirect(url_for("scheduler"))
 
     state = get_scheduler_state()

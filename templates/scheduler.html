@@ -156,6 +156,29 @@
         </div>
       </form>
 
+      <!-- ON / OFF Toggle -->
+      <div style="margin-top:14px;border-top:1px solid #e2e8f0;padding-top:14px;">
+        <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px;">ZAMANLAYICI KONTROLÜ</div>
+        <div style="display:flex;gap:8px;">
+          {% if state.running %}
+          <form method="POST" style="flex:1;">
+            <input type="hidden" name="action" value="stop_scheduler" />
+            <button type="submit" class="btn btn-ghost" style="width:100%;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;"
+                    onclick="return confirm('Zamanlayıcı durdurulacak. Emin misiniz?')">
+              ⏹ Zamanlayıcıyı Durdur (OFF)
+            </button>
+          </form>
+          {% else %}
+          <form method="POST" style="flex:1;">
+            <input type="hidden" name="action" value="start_scheduler" />
+            <button type="submit" class="btn btn-ghost" style="width:100%;background:#dcfce7;color:#166534;border:1px solid #86efac;">
+              ▶ Zamanlayıcıyı Başlat (ON)
+            </button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+
       <!-- Manuel Tetikleme -->
       <div style="margin-top:14px;border-top:1px solid #e2e8f0;padding-top:14px;">
         <h4 style="font-size:13px;font-weight:600;margin-bottom:10px;color:#334155;">Manuel Veri Çek</h4>

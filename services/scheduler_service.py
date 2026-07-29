@@ -136,13 +136,12 @@ def _sync_account(userid: int, musterino: int, start_dt: datetime, end_dt: datet
         # ── DB'ye kaydet (womsis_banka) ──────────────────────────────────────
         saved, skipped = _save_womsis_to_db(txs, userid=userid, musterino=musterino)
         
-        # ── POS Verilerini Çek ve Kaydet ─────────────────────────────────────
+        # ── POS Verilerini Çek ve Kaydet (14 günlük parçalar) ─────────────────
         from services.vomsis_service import (
             vomsis_get_terminals, vomsis_get_terminal_transactions,
             vomsis_get_pos_transactions_direct
         )
-        b_str = start_dt.strftime("%d-%m-%Y %H:%M:%S")
-        e_str = end_dt.strftime("%d-%m-%Y %H:%M:%S")
+        CHUNK_DAYS = 14
         pos_txs_total = []
         pos_saved = 0
         pos_skipped = 0
@@ -151,22 +150,52 @@ def _sync_account(userid: int, musterino: int, start_dt: datetime, end_dt: datet
         if terminals:
             for term in terminals:
                 t_id = term.get("stationId") or term.get("id") or term.get("terminalId")
-                if t_id:
-                    term_txs = vomsis_get_terminal_transactions(api_url, token, t_id, b_str, e_str)
-                    if term_txs:
-                        pos_txs_total.extend(term_txs)
-                        ps, psk = _save_womsis_pos_to_db(term_txs, str(t_id), userid=userid, musterino=musterino)
-                        pos_saved += ps
-                        pos_skipped += psk
+                if not t_id:
+                    continue
+                # 14 günlük parçalar halinde çek
+                current_start = start_dt
+                while current_start <= end_dt:
+                    current_end = current_start + timedelta(days=CHUNK_DAYS - 1)
+                    if current_end > end_dt:
+                        current_end = end_dt
+                    current_end = current_end.replace(hour=23, minute=59, second=59)
+
+                    b_str = current_start.strftime("%d-%m-%Y %H:%M:%S")
+                    e_str = current_end.strftime("%d-%m-%Y %H:%M:%S")
+                    try:
+                        term_txs = vomsis_get_terminal_transactions(api_url, token, t_id, b_str, e_str)
+                        if term_txs:
+                            pos_txs_total.extend(term_txs)
+                            ps, psk = _save_womsis_pos_to_db(term_txs, str(t_id), userid=userid, musterino=musterino)
+                            pos_saved += ps
+                            pos_skipped += psk
+                    except Exception as te:
+                        logger.warning("Terminal %s (%s-%s) hatası: %s", t_id, b_str, e_str, te)
+
+                    current_start = current_end + timedelta(seconds=1)
         else:
             # Terminal tabanlı endpoint boş — direkt POS endpoint dene
             logger.info("Terminal listesi boş, direct POS endpoint deneniyor...")
-            direct_txs = vomsis_get_pos_transactions_direct(api_url, token, b_str, e_str)
-            if direct_txs:
-                pos_txs_total.extend(direct_txs)
-                ps, psk = _save_womsis_pos_to_db(direct_txs, '', userid=userid, musterino=musterino)
-                pos_saved += ps
-                pos_skipped += psk
+            current_start = start_dt
+            while current_start <= end_dt:
+                current_end = current_start + timedelta(days=CHUNK_DAYS - 1)
+                if current_end > end_dt:
+                    current_end = end_dt
+                current_end = current_end.replace(hour=23, minute=59, second=59)
+
+                b_str = current_start.strftime("%d-%m-%Y %H:%M:%S")
+                e_str = current_end.strftime("%d-%m-%Y %H:%M:%S")
+                try:
+                    direct_txs = vomsis_get_pos_transactions_direct(api_url, token, b_str, e_str)
+                    if direct_txs:
+                        pos_txs_total.extend(direct_txs)
+                        ps, psk = _save_womsis_pos_to_db(direct_txs, '', userid=userid, musterino=musterino)
+                        pos_saved += ps
+                        pos_skipped += psk
+                except Exception as te:
+                    logger.warning("Direct POS (%s-%s) hatası: %s", b_str, e_str, te)
+
+                current_start = current_end + timedelta(seconds=1)
 
         return {
             "success": True,
