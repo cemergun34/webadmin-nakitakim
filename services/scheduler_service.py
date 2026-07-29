@@ -116,7 +116,7 @@ def _sync_account(userid: int, musterino: int, start_dt: datetime, end_dt: datet
     """
     from services.vomsis_service import (
         get_vomsis_bilgileri, vomsis_authenticate,
-        vomsis_get_all_transactions_chunked
+        vomsis_get_accounts, vomsis_get_account_transactions
     )
 
     bilgi = get_vomsis_bilgileri(userid, musterino)
@@ -131,7 +131,25 @@ def _sync_account(userid: int, musterino: int, start_dt: datetime, end_dt: datet
                 "message": f"Token alınamadı: {err}"}
 
     try:
-        txs = vomsis_get_all_transactions_chunked(api_url, token, start_dt, end_dt)
+        # PHP topluWomIsle.php: her hesap için ayrı ayrı /accounts/{id}/transactions çağrısı
+        # Bu yöntem tx.account nesnesini (branch_name, bank_id) doğru döndürür
+        accounts = vomsis_get_accounts(api_url, token)
+        txs = []
+        for acc in accounts:
+            acc_id = acc.get('id')
+            if not acc_id:
+                continue
+            current = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+            while current < end_dt:
+                chunk_end = min(current + timedelta(days=6), end_dt)
+                chunk_end = chunk_end.replace(hour=23, minute=59, second=59)
+                begin_str = current.strftime("%d-%m-%Y %H:%M:%S")
+                end_str   = chunk_end.strftime("%d-%m-%Y %H:%M:%S")
+                chunk_txs = vomsis_get_account_transactions(api_url, token, acc_id, begin_str, end_str)
+                txs.extend(chunk_txs)
+                logger.debug("Hesap %s chunk %s→%s: %d işlem", acc_id, begin_str[:10], end_str[:10], len(chunk_txs))
+                current = (current + timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
+        logger.info("Banka çekim: %d hesap, toplam %d işlem", len(accounts), len(txs))
         
         # ── DB'ye kaydet (womsis_banka) ──────────────────────────────────────
         saved, skipped = _save_womsis_to_db(txs, userid=userid, musterino=musterino)
@@ -245,14 +263,31 @@ def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) 
         conn = get_connection()
         cur  = conn.cursor()
 
-        for tx in transactions:
-            account_id = str(tx.get('accountId') or tx.get('account_id') or '')
-            tx_id      = str(tx.get('id') or tx.get('transactionId') or '')
-            womsiskey  = f"{account_id}_{tx_id}" if account_id and tx_id else ''
+        # PHP topluWomIsle.php banka ID → isim eşlemesi (bankConfig)
+        BANK_ID_MAP = {
+            19: 'Ziraat Bankası',
+            20: 'İş Bankası',
+            21: 'Yapı Kredi',
+            22: 'Enpara',
+            23: 'Vakıf Katılım',
+        }
 
-            raw_tarih = str(tx.get('date') or tx.get('transactionDate') or tx.get('valueDate') or '')
+        for tx in transactions:
+            # ── womsiskey: PHP $trx['key'] kullanır (id değil!) ──────────────
+            womsiskey = str(tx.get('key') or '')
+            if not womsiskey:
+                # Fallback: account_id + transaction_id
+                account_id = str(tx.get('accountId') or tx.get('account_id') or '')
+                tx_id      = str(tx.get('id') or tx.get('transactionId') or '')
+                womsiskey  = f"{account_id}_{tx_id}" if account_id and tx_id else ''
+
+            # ── Tarih: PHP $trx['system_date'] ?? $trx['accounting_date'] ────
+            raw_tarih = str(
+                tx.get('system_date') or tx.get('accounting_date') or
+                tx.get('date') or tx.get('transactionDate') or tx.get('valueDate') or ''
+            )
             tarih_iso = None
-            for fmt in ('%Y-%m-%d', '%d-%m-%Y %H:%M:%S', '%d-%m-%Y', '%Y-%m-%dT%H:%M:%S'):
+            for fmt in ('%d-%m-%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%d-%m-%Y', '%Y-%m-%dT%H:%M:%S'):
                 try:
                     tarih_iso = datetime.strptime(raw_tarih[:len(fmt)], fmt).strftime('%Y-%m-%d')
                     break
@@ -261,30 +296,52 @@ def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) 
             if not tarih_iso:
                 tarih_iso = now.strftime('%Y-%m-%d')
 
-            tutar_raw    = tx.get('amount') or tx.get('tutar') or 0
-            tutar        = abs(float(tutar_raw))
-            debit        = float(tx.get('debit')  or 0)
-            credit       = float(tx.get('credit') or 0)
-            if credit > 0 and debit == 0:
+            tutar_raw = tx.get('amount') or tx.get('tutar') or 0
+            tutar     = abs(float(tutar_raw))
+
+            # ── gelirgider: PHP $trx['type'] → 'borclu'/'alacakli' ───────────
+            # PHP banka perspektifinden çevirir:
+            #   'borclu'   = banka sizi borçlu sayar = para GİRİŞİ = gelir
+            #   'alacakli' = banka sizden alacaklı   = para ÇIKIŞI = gider
+            tx_type = str(tx.get('type') or '').lower().strip()
+            if tx_type == 'borclu':
                 gelirgider = 'gelir'
-            elif debit > 0 and credit == 0:
+            elif tx_type == 'alacakli':
                 gelirgider = 'gider'
             else:
-                gelirgider = 'gelir' if float(tutar_raw) >= 0 else 'gider'
+                # Fallback: debit/credit alanları veya amount işareti
+                debit  = float(tx.get('debit')  or 0)
+                credit = float(tx.get('credit') or 0)
+                if credit > 0 and debit == 0:
+                    gelirgider = 'gelir'
+                elif debit > 0 and credit == 0:
+                    gelirgider = 'gider'
+                else:
+                    gelirgider = 'gelir' if float(tutar_raw) >= 0 else 'gider'
 
-            aciklama  = str(tx.get('description') or tx.get('aciklama') or '')[:255]
+            aciklama = str(tx.get('description') or tx.get('aciklama') or '')[:255]
 
-            # Womsis API, hesap bilgisini nested object olarak döner:
-            #   tx.account = { bank: {bank_title}, branch_name, iban, account_number, ... }
-            # Düz alan (accountName, bankName) yoksa nested yapıdan çek
+            # ── Şube: PHP $account['bank_id'] → bankConfig lookup ─────────────
+            # tx.account = { bank_id, branch_name, iban, bank:{bank_title}, ... }
             _account_obj = tx.get('account') or {}
             if isinstance(_account_obj, dict):
-                _bank_obj     = _account_obj.get('bank') or {}
-                _bank_title   = (_bank_obj.get('bank_title') or _bank_obj.get('bank_name') or '') if isinstance(_bank_obj, dict) else ''
-                _branch_name  = _account_obj.get('branch_name') or ''
-                _acc_no       = _account_obj.get('formatted_account_number') or _account_obj.get('account_number') or ''
-                _acc_iban     = _account_obj.get('iban') or ''
-                # Şube: "Banka Adı - Şube Adı" formatında birleştir
+                _bank_id   = _account_obj.get('bank_id') or tx.get('bank_id')
+                _bank_obj  = _account_obj.get('bank') or {}
+                _bank_title = ''
+                # 1. bank_id → BANK_ID_MAP (PHP öncelik sırası)
+                if _bank_id:
+                    try:
+                        _bank_title = BANK_ID_MAP.get(int(_bank_id), '')
+                    except Exception:
+                        pass
+                # 2. account.bank.bank_title (nested)
+                if not _bank_title and isinstance(_bank_obj, dict):
+                    _bank_title = _bank_obj.get('bank_title') or _bank_obj.get('bank_name') or ''
+
+                _branch_name = _account_obj.get('branch_name') or ''
+                _acc_no      = _account_obj.get('formatted_account_number') or _account_obj.get('account_number') or ''
+                _acc_iban    = _account_obj.get('iban') or ''
+
                 if _branch_name and _bank_title:
                     sube = f"{_bank_title} - {_branch_name}"
                 elif _branch_name:
@@ -294,9 +351,11 @@ def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) 
                 else:
                     sube = str(tx.get('accountName') or tx.get('bankName') or tx.get('sube') or '')
             else:
-                sube = str(tx.get('accountName') or tx.get('bankName') or tx.get('sube') or str(_account_obj) if _account_obj else '')
+                _acc_iban = ''
+                sube = str(tx.get('accountName') or tx.get('bankName') or tx.get('sube') or '')
 
-            iban      = str(tx.get('iban') or (_account_obj.get('iban') if isinstance(_account_obj, dict) else '') or '')
+            # ── IBAN: PHP $trx['opponent_iban'] ──────────────────────────────
+            iban      = str(tx.get('opponent_iban') or tx.get('iban') or _acc_iban or '')
             bakiye    = float(tx.get('balance') or tx.get('bakiye') or 0)
             hesap_turu= str(tx.get('currency') or tx.get('hesap_turu') or 'TL')
             dekont_no = str(tx.get('referenceNo') or tx.get('dekont_no') or '')
