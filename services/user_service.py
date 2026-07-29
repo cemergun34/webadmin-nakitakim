@@ -204,7 +204,11 @@ def verify_admin_login(username: str, password: str) -> Optional[dict]:
         if stored == hashlib.md5(password.encode()).hexdigest():
             return {k: v for k, v in row_dict.items() if k != "sifre"}
 
-        # 3. bcrypt ($2b$ veya PHP $2y$ → $2b$)
+        # 3. SHA-256 (webadmin/fppro bazı versiyonları bu algoritmayı kullanır)
+        if stored == hashlib.sha256(password.encode()).hexdigest():
+            return {k: v for k, v in row_dict.items() if k != "sifre"}
+
+        # 4. bcrypt ($2b$ veya PHP $2y$ → $2b$)
         try:
             import bcrypt
             check_hash = stored.replace("$2y$", "$2b$", 1).encode()
