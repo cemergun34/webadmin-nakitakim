@@ -219,34 +219,47 @@ def pos_sync_womsis():
             "period":  {"start": start_dt.strftime("%Y-%m-%d"), "end": end_dt.strftime("%Y-%m-%d")},
         })
 
-    # ── Her terminal için 7 günlük parçalar hâlinde veri çek ──────────────────
+    # ── Her terminal için 14 günlük parçalar hâlinde veri çek ─────────────────
     from services.scheduler_service import _save_womsis_pos_to_db
+    from datetime import timedelta
 
     total_fetched = 0
     total_saved   = 0
     total_skipped = 0
     now_str = datetime.now().isoformat()
-
-    b_str = start_dt.strftime("%d-%m-%Y %H:%M:%S")
-    e_str = end_dt.strftime("%d-%m-%Y %H:%M:%S")
+    CHUNK_DAYS = 14
 
     for term in terminals:
         t_id = term.get("stationId") or term.get("id") or term.get("terminalId")
         if not t_id:
             continue
-        try:
-            term_txs = vomsis_get_terminal_transactions(api_url, token, t_id, b_str, e_str)
-            if term_txs:
-                total_fetched += len(term_txs)
-                ps, psk = _save_womsis_pos_to_db(
-                    term_txs, str(t_id), userid=userid, musterino=musterino
-                )
-                total_saved   += ps
-                total_skipped += psk
-                logger.info("POS sync — terminal %s: %d çekildi, %d kaydedildi, %d atlandı",
-                            t_id, len(term_txs), ps, psk)
-        except Exception as te:
-            logger.warning("Terminal %s hatası: %s", t_id, te)
+            
+        current_start = start_dt
+        while current_start <= end_dt:
+            current_end = current_start + timedelta(days=CHUNK_DAYS - 1)
+            if current_end > end_dt:
+                current_end = end_dt
+                
+            current_end = current_end.replace(hour=23, minute=59, second=59)
+
+            b_str = current_start.strftime("%d-%m-%Y %H:%M:%S")
+            e_str = current_end.strftime("%d-%m-%Y %H:%M:%S")
+
+            try:
+                term_txs = vomsis_get_terminal_transactions(api_url, token, t_id, b_str, e_str)
+                if term_txs:
+                    total_fetched += len(term_txs)
+                    ps, psk = _save_womsis_pos_to_db(
+                        term_txs, str(t_id), userid=userid, musterino=musterino
+                    )
+                    total_saved   += ps
+                    total_skipped += psk
+                    logger.info("POS sync — terminal %s (%s - %s): %d çekildi, %d kaydedildi, %d atlandı",
+                                t_id, b_str, e_str, len(term_txs), ps, psk)
+            except Exception as te:
+                logger.warning("Terminal %s hatası (%s - %s): %s", t_id, b_str, e_str, te)
+                
+            current_start = current_end + timedelta(seconds=1)
 
     logger.info("Womsis POS sync tamamlandı: %d çekildi, %d kaydedildi (userid=%s, musterino=%s)",
                 total_fetched, total_saved, userid, musterino)

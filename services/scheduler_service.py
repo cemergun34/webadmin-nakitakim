@@ -296,7 +296,7 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
 
         for tx in transactions:
             # Temel alanları JSON'dan al
-            raw_tarih = str(tx.get('transactionDate') or tx.get('date') or '')
+            raw_tarih = str(tx.get('date') or tx.get('transactionDate') or '')
             tarih_iso = now.strftime('%Y-%m-%d %H:%M:%S')
             for fmt in ('%d-%m-%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
                 try:
@@ -305,7 +305,7 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
                 except Exception:
                     continue
             
-            hesaba_gecis = str(tx.get('valueDate') or tx.get('paymentDate') or '')
+            hesaba_gecis = str(tx.get('valor') or tx.get('transfer_to_account_date') or tx.get('settlementDate') or tx.get('valueDate') or tx.get('paymentDate') or '')
             if hesaba_gecis:
                 for fmt in ('%d-%m-%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d', '%d-%m-%Y'):
                     try:
@@ -315,20 +315,21 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
                         pass
                         
             # Rakamlar
-            islemtutari = float(str(tx.get('amount') or tx.get('transactionAmount') or tx.get('islemtutari') or 0).replace(",", "."))
-            isyeriucreti = float(str(tx.get('commissionAmount') or tx.get('commission') or tx.get('merchantCommissionAmount') or tx.get('isyeriucretitutar') or 0).replace(",", "."))
-            nettutar = float(str(tx.get('netAmount') or tx.get('net') or tx.get('nettutar') or 0).replace(",", "."))
+            islemtutari = float(str(tx.get('gross_amount') or tx.get('amount') or tx.get('islemTutari') or tx.get('transactionAmount') or 0).replace(",", "."))
+            isyeriucreti = float(str(tx.get('commission') or tx.get('commissionAmount') or tx.get('fee') or tx.get('merchantCommissionAmount') or 0).replace(",", "."))
+            nettutar = float(str(tx.get('net_amount') or tx.get('netAmount') or tx.get('net') or tx.get('nettutar') or 0).replace(",", "."))
             
             # Kart ve POS bilgileri
-            posno = str(tx.get('terminalNo') or tx.get('posNo') or posno_fallback or '')
-            brand = str(tx.get('brand') or tx.get('cardBrand') or '')
-            kartno = str(tx.get('maskedCardNumber') or tx.get('cardNo') or tx.get('kartno') or '')
-            islemtipi = str(tx.get('type') or tx.get('transactionType') or '')
-            isyerino = str(tx.get('merchantId') or tx.get('merchantNo') or tx.get('isyerino') or '')
+            posno = str(tx.get('station') or tx.get('stationNo') or tx.get('terminalNo') or tx.get('posNo') or posno_fallback or '')
+            brand = str(tx.get('sub_card_type') or tx.get('card_type') or tx.get('cardBrand') or tx.get('brand') or '')
+            kartno = str(tx.get('card_number') or tx.get('maskedCardNumber') or tx.get('maskedCardNo') or tx.get('cardNo') or '')
+            islemtipi = str(tx.get('transaction_type') or tx.get('type') or tx.get('transactionType') or '')
+            isyerino = str(tx.get('workplace') or tx.get('workplaceNo') or tx.get('merchantNo') or tx.get('merchantId') or '')
             aciklama = str(tx.get('description') or tx.get('aciklama') or '')[:255]
+            carihesap = str(tx.get('bank_title') or tx.get('bankTitle') or '-')
 
             # Mükerrer kontrolü
-            tx_id = str(tx.get('id') or tx.get('transactionId') or '')
+            tx_id = str(tx.get('transaction_id') or tx.get('id') or tx.get('transactionId') or '')
             if tx_id:
                 cur.execute('SELECT id FROM womsi_pos WHERE kayittarihi = %s AND userid = %s LIMIT 1', (tx_id, userid))
                 if cur.fetchone():
@@ -355,7 +356,7 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
             """, (
                 userid, islemtutari, isyeriucreti, nettutar, musterino,
                 tarih_iso, posno, tx_id, tarih_iso[:10], brand,
-                kartno, islemtipi, isyerino, '-', hesaba_gecis, aciklama
+                kartno, islemtipi, isyerino, carihesap, hesaba_gecis, aciklama
             ))
             saved += 1
 

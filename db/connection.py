@@ -160,7 +160,14 @@ class _PgWrapper:
         self._conn.rollback()
 
     def close(self):
-        pass  # Bağlantı havuzda kalır
+        # Bağlantı havuzda kalır, havuza iade ediyoruz
+        from db.connection import _pool
+        if self._conn and _pool:
+            try:
+                _pool.putconn(self._conn)
+            except Exception:
+                pass
+        self._conn = None
 
     def cursor(self):
         import psycopg2.extras
@@ -170,78 +177,91 @@ class _PgWrapper:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type:
-            self.rollback()
-        else:
-            self.commit()
+        try:
+            if exc_type:
+                self.rollback()
+            else:
+                self.commit()
+        finally:
+            self.close()
         return False
 
+
+# Global Pool
+_pool = None
+_pool_lock = threading.Lock()
+
+def _init_pool():
+    global _pool
+    if _pool is not None:
+        return
+    
+    with _pool_lock:
+        if _pool is not None:
+            return
+            
+        from db.db_config import get_pg_params
+        from psycopg2.pool import ThreadedConnectionPool
+        
+        params = get_pg_params()
+        primary_port = int(params.get("port", 5432))
+        attempt = dict(params)
+        attempt["port"] = primary_port
+        attempt.setdefault('keepalives', 1)
+        attempt.setdefault('keepalives_idle', 30)
+        attempt.setdefault('keepalives_interval', 10)
+        attempt.setdefault('keepalives_count', 5)
+        
+        try:
+            logger.info(f"[DB] ThreadedConnectionPool başlatılıyor: {attempt['host']}:{primary_port}")
+            _pool = ThreadedConnectionPool(1, 10, **attempt)
+        except Exception as exc:
+            logger.warning(f"[DB] Havuz başlatılamadı (port {primary_port}): {exc}")
+            # Fallback port if available
+            if primary_port == 5432:
+                attempt["port"] = 6543
+            elif primary_port == 6543:
+                attempt["port"] = 5432
+            logger.info(f"[DB] Alternatif port deneniyor: {attempt['port']}")
+            _pool = ThreadedConnectionPool(1, 10, **attempt)
 
 def get_connection() -> _PgWrapper:
     """
     Thread-safe PostgreSQL bağlantısı döndürür.
-    Mevcut bağlantı geçerliyse yeniden kullanır.
+    Bağlantı ThreadedConnectionPool'dan alınır.
+    Kullanım sonrası conn.close() ile havuza iade edilir.
     """
-    from db.db_config import get_pg_params
-    raw = getattr(_pg_local, "conn", None)
-    if raw is not None and not raw.closed:
-        try:
-            raw.rollback()
-            return _PgWrapper(raw)
-        except Exception:
-            try:
-                raw.close()
-            except Exception:
-                pass
-            _pg_local.conn = None
-
-    params = get_pg_params()
-    # Port fallback: 5432 → 6543 (Supabase)
-    primary_port = int(params.get("port", 5432))
-    fallback_ports = [primary_port]
-    if primary_port == 5432:
-        fallback_ports.append(6543)
-    elif primary_port == 6543:
-        fallback_ports.append(5432)
-
-    last_exc = None
-    for port in fallback_ports:
-        attempt = dict(params)
-        attempt["port"] = port
-        attempt["connect_timeout"] = 10 if port == primary_port else 15
-        try:
-            logger.info(f"[DB] Bağlantı deneniyor: {attempt['host']}:{port}")
-            conn = _try_pg_connect(attempt)
-            _pg_local.conn = conn
-            logger.info(f"[DB] Bağlantı başarılı ✅ port={port}")
-            return _PgWrapper(conn)
-        except RuntimeError as exc:
-            last_exc = exc
-            logger.warning(f"[DB] Port {port} başarısız: {exc}")
-
-    raise last_exc or RuntimeError("PostgreSQL bağlantısı kurulamadı.")
+    if _pool is None:
+        _init_pool()
+        
+    try:
+        raw = _pool.getconn()
+        raw.autocommit = False
+        return _PgWrapper(raw)
+    except Exception as exc:
+        raise RuntimeError(f"PostgreSQL bağlantısı kurulamadı: {exc}")
 
 
 def close_pg_pool():
-    """Thread bağlantısını kapat."""
-    raw = getattr(_pg_local, "conn", None)
-    if raw:
+    """Tüm havuzu kapat (Uygulama sonlanırken çağrılabilir)."""
+    global _pool
+    if _pool:
         try:
-            raw.close()
+            _pool.closeall()
         except Exception:
             pass
-        _pg_local.conn = None
+        _pool = None
 
 
 def test_connection() -> dict:
     """Bağlantı testi — config sayfasından çağrılır."""
     try:
-        from db.db_config import get_pg_params
-        import psycopg2
-        conn = psycopg2.connect(**get_pg_params())
+        if _pool is None:
+            _init_pool()
+        conn = _pool.getconn()
         ver = conn.server_version
         major, minor = ver // 10000, (ver % 10000) // 100
-        conn.close()
-        return {"success": True, "message": f"Bağlantı başarılı! PostgreSQL {major}.{minor}"}
+        _pool.putconn(conn)
+        return {"success": True, "message": f"Bağlantı başarılı! PostgreSQL {major}.{minor} (Pool Aktif)"}
     except Exception as exc:
         return {"success": False, "message": str(exc)}
