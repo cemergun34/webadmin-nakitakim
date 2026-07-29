@@ -269,12 +269,24 @@ def create_user(musterino: int, data: dict) -> dict:
 
         hashed  = _hash_password(data.get("sifre", ""))
         now_str = datetime.now().isoformat()
+
+        # ── Önce aynı musterino'daki ana hesabı bul (bagli_hesap için) ───────
+        cur.execute("""
+            SELECT id FROM uyelik
+            WHERE musterino = %s
+            ORDER BY id ASC
+            LIMIT 1
+        """, (musterino,))
+        ana_row = cur.fetchone()
+        # Ana hesap varsa ona bağla, yoksa -1 (bu kullanıcı ana hesap olacak)
+        bagli = ana_row[0] if ana_row else -1
+
         cur.execute("""
             INSERT INTO uyelik
                 (ad, soyad, kullanici_adi, eposta, sifre,
                  musterino, yetki, paket_turu, son_odeme,
-                 uyelik_tarihi, hesapturu)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 uyelik_tarihi, hesapturu, bagli_hesap)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             RETURNING id
         """, (
             data.get("ad", ""),
@@ -288,8 +300,14 @@ def create_user(musterino: int, data: dict) -> dict:
             data.get("son_odeme", "") or None,
             now_str,
             0,
+            bagli,
         ))
         new_id = cur.fetchone()[0]
+        logger.info(
+            "Yeni kullanıcı oluşturuldu: id=%s kullanici_adi=%s musterino=%s bagli_hesap=%s",
+            new_id, data.get("kullanici_adi"), musterino, bagli
+        )
+
         conn.commit()
         cur.close(); conn.close()
         return {"success": True, "id": new_id}
