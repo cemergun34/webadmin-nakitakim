@@ -270,16 +270,29 @@ def create_user(musterino: int, data: dict) -> dict:
         hashed  = _hash_password(data.get("sifre", ""))
         now_str = datetime.now().isoformat()
 
-        # ── Önce aynı musterino'daki ana hesabı bul (bagli_hesap için) ───────
+        # ── Veri sahibi userid'i bul (bagli_hesap için) ───────────────────
+        # genel_hesap_hareketleri tablosunda en çok veriye sahip userid'i bul
+        # Bu, verilerin gerçek sahibidir — yeni kullanıcı ona bağlanmalı
         cur.execute("""
-            SELECT id FROM uyelik
-            WHERE musterino = %s
-            ORDER BY id ASC
+            SELECT userid FROM genel_hesap_hareketleri
+            WHERE musteri_no = %s
+            GROUP BY userid
+            ORDER BY COUNT(*) DESC
             LIMIT 1
         """, (musterino,))
-        ana_row = cur.fetchone()
-        # Ana hesap varsa ona bağla, yoksa -1 (bu kullanıcı ana hesap olacak)
-        bagli = ana_row[0] if ana_row else -1
+        veri_sahibi = cur.fetchone()
+        if veri_sahibi:
+            bagli = veri_sahibi[0]
+        else:
+            # Veri yoksa en eski kullanıcıyı bul
+            cur.execute("""
+                SELECT id FROM uyelik
+                WHERE musterino = %s
+                ORDER BY id ASC
+                LIMIT 1
+            """, (musterino,))
+            ana_row = cur.fetchone()
+            bagli = ana_row[0] if ana_row else -1
 
         cur.execute("""
             INSERT INTO uyelik
