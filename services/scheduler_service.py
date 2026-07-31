@@ -312,7 +312,7 @@ def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) 
 
             tutar_raw = tx.get('amount') or tx.get('tutar') or 0
             try:
-                tutar = float(str(tutar_raw).replace(',', '.'))
+                tutar = -float(str(tutar_raw).replace(',', '.'))
             except (ValueError, TypeError):
                 tutar = 0.0
 
@@ -457,11 +457,11 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
 
             # ── Rakamlar ─────────────────────────────────────────────────────
             # PHP: (float)($tx['gross_amount'] ?? 0)
-            islemtutari  = float(str(tx.get('gross_amount') or tx.get('amount') or 0).replace(",", "."))
+            islemtutari  = -float(str(tx.get('gross_amount') or tx.get('amount') or 0).replace(",", "."))
             # PHP: (float)($tx['commission'] ?? 0)
-            isyeriucreti = float(str(tx.get('commission') or tx.get('commissionAmount') or 0).replace(",", "."))
+            isyeriucreti = -float(str(tx.get('commission') or tx.get('commissionAmount') or 0).replace(",", "."))
             # PHP: (float)($tx['net_amount'] ?? 0)
-            nettutar     = float(str(tx.get('net_amount') or tx.get('netAmount') or 0).replace(",", "."))
+            nettutar     = -float(str(tx.get('net_amount') or tx.get('netAmount') or 0).replace(",", "."))
 
             # ── Kart ve POS bilgileri ─────────────────────────────────────────
             # PHP: $tx['station'] ?? $stationNo  (station nesnesinden gelen)
