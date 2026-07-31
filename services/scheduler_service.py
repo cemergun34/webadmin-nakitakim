@@ -245,6 +245,28 @@ def _sync_account(userid: int, musterino: int, start_dt: datetime, end_dt: datet
         return {"success": False, "count": 0, "message": str(e)}
 
 
+
+def _parse_vomsis_date(raw: str, include_time: bool = False, default_val: str = None) -> str:
+    if not raw: return default_val
+    s = str(raw).strip()
+    if not s: return default_val
+    if 'T' in s:
+        s = s.split('+')[0].split('Z')[0]
+        if '.' in s: s = s.split('.')[0]
+        s = s.replace('T', ' ')
+    for fmt in (
+        '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d',
+        '%d.%m.%Y %H:%M:%S', '%d.%m.%Y %H:%M', '%d.%m.%Y',
+        '%d/%m/%Y %H:%M:%S', '%d/%m/%Y %H:%M', '%d/%m/%Y',
+        '%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%Y'
+    ):
+        try:
+            dt = datetime.strptime(s, fmt)
+            return dt.strftime('%Y-%m-%d %H:%M:%S') if include_time else dt.strftime('%Y-%m-%d')
+        except Exception:
+            pass
+    return default_val
+
 def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) -> tuple[int, int]:
     """
     Womsis API'den gelen işlemleri womsis_banka tablosuna kaydeder.
@@ -286,24 +308,7 @@ def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) 
                 tx.get('system_date') or tx.get('accounting_date') or
                 tx.get('date') or tx.get('transactionDate') or tx.get('valueDate') or ''
             )
-            tarih_iso = None
-            s = raw_tarih.strip()
-            if "T" in s and "." in s:
-                s = s.split(".")[0]
-            for fmt in (
-                '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d',
-                '%d.%m.%Y %H:%M:%S', '%d.%m.%Y %H:%M', '%d.%m.%Y',
-                '%d/%m/%Y %H:%M:%S', '%d/%m/%Y %H:%M', '%d/%m/%Y',
-                '%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%Y',
-                '%Y-%m-%dT%H:%M:%S'
-            ):
-                try:
-                    tarih_iso = datetime.strptime(s, fmt).strftime('%Y-%m-%d')
-                    break
-                except Exception:
-                    continue
-            if not tarih_iso:
-                tarih_iso = now.strftime('%Y-%m-%d')
+            tarih_iso = _parse_vomsis_date(raw_tarih, False, now.strftime('%Y-%m-%d'))
 
             tutar_raw = tx.get('amount') or tx.get('tutar') or 0
             tutar     = abs(float(tutar_raw))
@@ -436,45 +441,16 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
             # ── Tarih ─────────────────────────────────────────────────────────
             # PHP: $tx['date']
             raw_tarih = str(tx.get('date') or tx.get('transactionDate') or '')
-            tarih_iso = None
-            s = raw_tarih.strip()
-            if "T" in s and "." in s:
-                s = s.split(".")[0]
-            for fmt in (
-                '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d',
-                '%d.%m.%Y %H:%M:%S', '%d.%m.%Y %H:%M', '%d.%m.%Y',
-                '%d/%m/%Y %H:%M:%S', '%d/%m/%Y %H:%M', '%d/%m/%Y',
-                '%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%Y',
-                '%Y-%m-%dT%H:%M:%S'
-            ):
-                try:
-                    tarih_iso = datetime.strptime(s, fmt).strftime('%Y-%m-%d %H:%M:%S')
-                    break
-                except Exception:
-                    continue
-            if not tarih_iso:
-                tarih_iso = now.strftime('%Y-%m-%d %H:%M:%S')
+            tarih_iso = _parse_vomsis_date(raw_tarih, True, now.strftime('%Y-%m-%d %H:%M:%S'))
 
             # ── Hesaba Geçiş Tarihi ───────────────────────────────────────────
             # PHP: $tx['valor'] ?? $tx['transfer_to_account_date']
             hesaba_gecis = str(tx.get('valor') or tx.get('transfer_to_account_date') or
                                tx.get('settlementDate') or tx.get('valueDate') or '')
             if hesaba_gecis:
-                s = hesaba_gecis.strip()
-                if "T" in s and "." in s:
-                    s = s.split(".")[0]
-                for fmt in (
-                    '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d',
-                    '%d.%m.%Y %H:%M:%S', '%d.%m.%Y %H:%M', '%d.%m.%Y',
-                    '%d/%m/%Y %H:%M:%S', '%d/%m/%Y %H:%M', '%d/%m/%Y',
-                    '%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%Y',
-                    '%Y-%m-%dT%H:%M:%S'
-                ):
-                    try:
-                        hesaba_gecis = datetime.strptime(s, fmt).strftime('%Y-%m-%d')
-                        break
-                    except Exception:
-                        pass
+                parsed_hg = _parse_vomsis_date(hesaba_gecis, False)
+                if parsed_hg:
+                    hesaba_gecis = parsed_hg
 
             # ── Rakamlar ─────────────────────────────────────────────────────
             # PHP: (float)($tx['gross_amount'] ?? 0)
