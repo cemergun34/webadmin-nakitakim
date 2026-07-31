@@ -287,9 +287,18 @@ def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) 
                 tx.get('date') or tx.get('transactionDate') or tx.get('valueDate') or ''
             )
             tarih_iso = None
-            for fmt in ('%d-%m-%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%d-%m-%Y', '%Y-%m-%dT%H:%M:%S'):
+            s = raw_tarih.strip()
+            if "T" in s and "." in s:
+                s = s.split(".")[0]
+            for fmt in (
+                '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d',
+                '%d.%m.%Y %H:%M:%S', '%d.%m.%Y %H:%M', '%d.%m.%Y',
+                '%d/%m/%Y %H:%M:%S', '%d/%m/%Y %H:%M', '%d/%m/%Y',
+                '%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%Y',
+                '%Y-%m-%dT%H:%M:%S'
+            ):
                 try:
-                    tarih_iso = datetime.strptime(raw_tarih[:len(fmt)], fmt).strftime('%Y-%m-%d')
+                    tarih_iso = datetime.strptime(s, fmt).strftime('%Y-%m-%d')
                     break
                 except Exception:
                     continue
@@ -427,22 +436,42 @@ def _save_womsis_pos_to_db(transactions: list, posno_fallback: str, userid: int 
             # ── Tarih ─────────────────────────────────────────────────────────
             # PHP: $tx['date']
             raw_tarih = str(tx.get('date') or tx.get('transactionDate') or '')
-            tarih_iso = now.strftime('%Y-%m-%d %H:%M:%S')
-            for fmt in ('%d-%m-%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d', '%d-%m-%Y'):
+            tarih_iso = None
+            s = raw_tarih.strip()
+            if "T" in s and "." in s:
+                s = s.split(".")[0]
+            for fmt in (
+                '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d',
+                '%d.%m.%Y %H:%M:%S', '%d.%m.%Y %H:%M', '%d.%m.%Y',
+                '%d/%m/%Y %H:%M:%S', '%d/%m/%Y %H:%M', '%d/%m/%Y',
+                '%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%Y',
+                '%Y-%m-%dT%H:%M:%S'
+            ):
                 try:
-                    tarih_iso = datetime.strptime(raw_tarih[:len(fmt)], fmt).strftime('%Y-%m-%d %H:%M:%S')
+                    tarih_iso = datetime.strptime(s, fmt).strftime('%Y-%m-%d %H:%M:%S')
                     break
                 except Exception:
                     continue
+            if not tarih_iso:
+                tarih_iso = now.strftime('%Y-%m-%d %H:%M:%S')
 
             # ── Hesaba Geçiş Tarihi ───────────────────────────────────────────
             # PHP: $tx['valor'] ?? $tx['transfer_to_account_date']
             hesaba_gecis = str(tx.get('valor') or tx.get('transfer_to_account_date') or
                                tx.get('settlementDate') or tx.get('valueDate') or '')
             if hesaba_gecis:
-                for fmt in ('%d-%m-%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d', '%d-%m-%Y'):
+                s = hesaba_gecis.strip()
+                if "T" in s and "." in s:
+                    s = s.split(".")[0]
+                for fmt in (
+                    '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d',
+                    '%d.%m.%Y %H:%M:%S', '%d.%m.%Y %H:%M', '%d.%m.%Y',
+                    '%d/%m/%Y %H:%M:%S', '%d/%m/%Y %H:%M', '%d/%m/%Y',
+                    '%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%Y',
+                    '%Y-%m-%dT%H:%M:%S'
+                ):
                     try:
-                        hesaba_gecis = datetime.strptime(hesaba_gecis[:len(fmt)], fmt).strftime('%Y-%m-%d')
+                        hesaba_gecis = datetime.strptime(s, fmt).strftime('%Y-%m-%d')
                         break
                     except Exception:
                         pass
