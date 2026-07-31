@@ -308,7 +308,7 @@ def _save_womsis_to_db(transactions: list, userid: int = 1, musterino: int = 1) 
                 tx.get('system_date') or tx.get('accounting_date') or
                 tx.get('date') or tx.get('transactionDate') or tx.get('valueDate') or ''
             )
-            tarih_iso = _parse_vomsis_date(raw_tarih, False, now.strftime('%Y-%m-%d'))
+            tarih_iso = _parse_vomsis_date(raw_tarih, True, now.strftime('%Y-%m-%d %H:%M:%S'))
 
             tutar_raw = tx.get('amount') or tx.get('tutar') or 0
             tutar     = abs(float(tutar_raw))
